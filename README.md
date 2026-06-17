@@ -13,7 +13,7 @@
 
 ## 技术栈
 
-- 后端：Spring Boot 3.x + JDK 21 + spring-ai-alibaba-starter-dashscope 1.0.0.1
+- 后端：Spring Boot 3.4.x + JDK 21 + spring-ai-alibaba 1.0.0.2（GA，BOM 管版本）
 - 模型：qwen-plus（对话/联网）、text-embedding-v3（向量）、qwen-vl（图片）、paraformer（语音，加分项）
 - 数据：MySQL 8 + SimpleVectorStore（文件版向量库）
 - 前端：Vue3 + Element Plus
