@@ -4,7 +4,7 @@
 
 **目标**：根据资料/主题自动生成结构化练习题（单选/填空/简答），LLM 输出稳定可解析的 JSON。
 
-**依赖**：Plan 0（骨架、契约）。成员2 的 `retrieve(userId, query, topK)`（交接点 B 前可用 hardcode 上下文解耦）。
+**依赖**：Plan 0（骨架、契约）。成员2 的 `getMaterialContext(userId, materialId, maxChunks)`（交接点 B 前可用 hardcode 上下文解耦）。
 
 **对外提供**：`POST /api/quiz` 出题能力。
 
@@ -25,7 +25,7 @@
 
 ## 任务 3：接入检索生成上下文
 
-- 交接点 B 后：用成员2 的 `retrieve` 取该 materialId 的代表性切片作为出题上下文（或取该资料全部切片做采样）
+- 交接点 B 后：用成员2 的 `getMaterialContext(userId, materialId, maxChunks)` 取该资料的代表性切片作为出题上下文
 - 把上下文喂给 prompt 出题
 - **验收**：基于真实上传的资料能出题，题目内容确实来自资料
 
