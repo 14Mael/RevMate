@@ -22,4 +22,31 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# IDE
 /.idea/
+/.reasonix/
+*.iml
+.vscode/
+
+# Maven build output
+target/
+
+# Node
+node_modules/
+
+# Local configuration (contains real API keys & passwords)
+application-local.yml
+application-local.yaml
+
+# Uploaded files
+uploads/
+
+# H2 database files
+data/
+*.mv.db
+*.trace.db
+
+# OS
+.DS_Store
+Thumbs.db
