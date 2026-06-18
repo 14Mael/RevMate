@@ -31,6 +31,10 @@ public class Material {
     @Column(nullable = false, length = 20)
     private String type;        // txt/pdf/word/image/audio
 
+    /** 文件在本地的实际存储路径，仅后端内部使用，不对外暴露 */
+    @Column(name = "storage_path", length = 512)
+    private String storagePath;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Status status;
