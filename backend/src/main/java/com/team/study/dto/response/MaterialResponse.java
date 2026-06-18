@@ -13,4 +13,5 @@ public class MaterialResponse {
     private String type;
     private String status;
     private LocalDateTime createdAt;
+    private boolean previewable;
 }

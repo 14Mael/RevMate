@@ -159,7 +159,8 @@ public class MaterialServiceImpl implements MaterialService {
                 material.getFilename(),
                 material.getType(),
                 material.getStatus().name(),
-                material.getCreatedAt()
+                material.getCreatedAt(),
+                material.getPreviewPath() != null
         );
     }
 
