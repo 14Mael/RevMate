@@ -22,9 +22,13 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import com.team.study.security.SecurityUtil;
+import org.mockito.MockedStatic;
 
 @ExtendWith(MockitoExtension.class)
 class MaterialServiceImplTest {
@@ -107,5 +111,59 @@ class MaterialServiceImplTest {
         assertEquals("excel", ReflectionTestUtils.invokeMethod(
                 materialService, "mimeTypeToContentType",
                 "application/vnd.ms-excel"));
+    }
+
+    @Test
+    void getPreviewResource_throwsWhenNoPreview() throws Exception {
+        Path file = uploadRoot.resolve("5").resolve("abc_doc.docx");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "content");
+
+        Material m = storedMaterial(10L, 5L, file);
+        m.setPreviewPath(null);
+        when(materialRepository.findById(10L)).thenReturn(Optional.of(m));
+
+        try (MockedStatic<SecurityUtil> securityMock = mockStatic(SecurityUtil.class)) {
+            securityMock.when(SecurityUtil::getCurrentUserId).thenReturn(5L);
+            assertThatThrownBy(() -> materialService.getPreviewResource(10L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("预览不可用");
+        }
+    }
+
+    @Test
+    void getPreviewResource_throwsWhenWrongUser() throws Exception {
+        Path file = uploadRoot.resolve("9").resolve("abc_doc.docx");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "content");
+
+        Material m = storedMaterial(11L, 9L, file);
+        m.setPreviewPath(file.toString());
+        when(materialRepository.findById(11L)).thenReturn(Optional.of(m));
+
+        try (MockedStatic<SecurityUtil> securityMock = mockStatic(SecurityUtil.class)) {
+            securityMock.when(SecurityUtil::getCurrentUserId).thenReturn(5L);
+            assertThatThrownBy(() -> materialService.getPreviewResource(11L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("无权访问该资料");
+        }
+    }
+
+    @Test
+    void getPreviewResource_returnsResourceWhenOk() throws Exception {
+        Path file = uploadRoot.resolve("5").resolve("preview.pdf");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "pdf content");
+
+        Material m = storedMaterial(10L, 5L, file);
+        m.setPreviewPath(file.toString());
+        when(materialRepository.findById(10L)).thenReturn(Optional.of(m));
+
+        try (MockedStatic<SecurityUtil> securityMock = mockStatic(SecurityUtil.class)) {
+            securityMock.when(SecurityUtil::getCurrentUserId).thenReturn(5L);
+            var resource = materialService.getPreviewResource(10L);
+            assertThat(resource).isNotNull();
+            assertThat(resource.exists()).isTrue();
+        }
     }
 }

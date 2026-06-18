@@ -140,6 +140,24 @@ public class MaterialServiceImpl implements MaterialService {
         materialRepository.delete(material);
     }
 
+    @Override
+    public org.springframework.core.io.Resource getPreviewResource(Long id) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        if (userId == null) {
+            throw new IllegalArgumentException("未登录");
+        }
+        Material material = materialRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("资料不存在"));
+        if (!material.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权访问该资料");
+        }
+        String previewPath = material.getPreviewPath();
+        if (previewPath == null || previewPath.isBlank()) {
+            throw new IllegalArgumentException("预览不可用");
+        }
+        return new org.springframework.core.io.FileSystemResource(previewPath);
+    }
+
     /** 删除磁盘上的物理文件，best-effort：文件缺失或删除失败不阻断删库 */
     private void deletePhysicalFile(Material material) {
         String storagePath = material.getStoragePath();
