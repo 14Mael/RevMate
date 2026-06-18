@@ -22,8 +22,14 @@ spring:
       max-request-size: 20MB
 
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY:your-api-key-here}
+    openai:
+      api-key: "sk-ws-H.RPDEDDR.1wHd.MEUCIQD1D8m5USMqS7BA-mdlKdxpYkeyjl94508pqKH9suSydgIgOxViHyae7CP0OvZa8iJ3oRhzmX2FltFBb4XNPUUvO3A"
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      chat:
+        options:
+          model: qwen3.5-omni-plus
+      embedding:
+        enabled: false
 
 # JWT
 jwt:
