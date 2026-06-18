@@ -40,7 +40,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<Result<Void>> handleUploadSizeExceeded(MaxUploadSizeExceededException e) {
-        return ResponseEntity.badRequest().body(Result.badRequest("文件大小超过限制 (最大 20MB)"));
+        return ResponseEntity.badRequest().body(Result.badRequest("文件大小超过限制 (最大 100MB)"));
     }
 
     @ExceptionHandler(BadCredentialsException.class)

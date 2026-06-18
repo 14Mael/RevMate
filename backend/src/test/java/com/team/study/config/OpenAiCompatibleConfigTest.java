@@ -40,6 +40,16 @@ class OpenAiCompatibleConfigTest {
     }
 
     @Test
+    void applicationConfigAllowsLargerAudioUploads() throws Exception {
+        String yaml = Files.readString(Path.of("src/main/resources/application.yml"));
+        String exceptionHandler = Files.readString(Path.of("src/main/java/com/team/study/common/GlobalExceptionHandler.java"));
+
+        assertThat(yaml).contains("max-file-size: 100MB");
+        assertThat(yaml).contains("max-request-size: 100MB");
+        assertThat(exceptionHandler).contains("最大 100MB");
+    }
+
+    @Test
     void readmeDocumentsOpenAiCompatibleRuntimeConfiguration() throws Exception {
         String readme = Files.readString(Path.of("../README.md"));
 
