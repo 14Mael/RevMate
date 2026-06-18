@@ -57,6 +57,7 @@ public class MaterialServiceImpl implements MaterialService {
             material.setUserId(userId);
             material.setFilename(originalFilename);
             material.setType(type);
+            material.setStoragePath(targetPath.toString());
             material.setStatus(Material.Status.PROCESSING);
             materialRepository.save(material);
 
@@ -95,7 +96,22 @@ public class MaterialServiceImpl implements MaterialService {
 
         // TODO 交接点 A: 调用成员2 的 removeByMaterial(materialId) 清理向量
 
+        deletePhysicalFile(material);
         materialRepository.delete(material);
+    }
+
+    /** 删除磁盘上的物理文件，best-effort：文件缺失或删除失败不阻断删库 */
+    private void deletePhysicalFile(Material material) {
+        String storagePath = material.getStoragePath();
+        if (storagePath == null || storagePath.isBlank()) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(Paths.get(storagePath));
+        } catch (IOException e) {
+            // 文件删除失败不应阻断业务，记录后继续删库
+            System.err.println("删除物理文件失败: " + storagePath + " - " + e.getMessage());
+        }
     }
 
     private MaterialResponse toResponse(Material material) {
