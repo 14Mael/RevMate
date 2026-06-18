@@ -1,6 +1,7 @@
 package com.team.study.service;
 
 import com.team.study.entity.Material;
+import com.team.study.extractor.ExtractorRouter;
 import com.team.study.repository.MaterialRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,10 @@ class MaterialServiceImplTest {
 
     @Mock
     private MaterialRepository materialRepository;
+    @Mock
+    private ExtractorRouter extractorRouter;
+    @Mock
+    private DocumentIngestionService documentIngestionService;
     @InjectMocks
     private MaterialServiceImpl materialService;
 
