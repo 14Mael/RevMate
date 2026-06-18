@@ -154,6 +154,15 @@ class MaterialServiceImplTest {
     }
 
     @Test
+    void detectMimeType_prefersKnownAudioExtension() throws Exception {
+        Path m4a = uploadRoot.resolve("lecture.m4a");
+        Files.writeString(m4a, "fake m4a content that tika may classify as text");
+
+        assertEquals("audio/mp4", ReflectionTestUtils.invokeMethod(
+                materialService, "detectMimeType", m4a.toFile(), "lecture.m4a"));
+    }
+
+    @Test
     void getPreviewResource_throwsWhenNoPreview() throws Exception {
         Path file = uploadRoot.resolve("5").resolve("abc_doc.docx");
         Files.createDirectories(file.getParent());

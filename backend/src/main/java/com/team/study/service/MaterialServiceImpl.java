@@ -222,13 +222,17 @@ public class MaterialServiceImpl implements MaterialService {
      * 基于已保存的文件内容检测 MIME 类型
      */
     private String detectMimeType(File file, String filename) {
+        String extensionMimeType = detectMimeTypeByExtension(filename);
+        if (extensionMimeType.startsWith("audio/")) {
+            return extensionMimeType;
+        }
         if (file == null || !file.isFile()) {
-            return detectMimeTypeByExtension(filename);
+            return extensionMimeType;
         }
         try {
             return tika.detect(file);
         } catch (IOException e) {
-            return detectMimeTypeByExtension(filename);
+            return extensionMimeType;
         }
     }
 
