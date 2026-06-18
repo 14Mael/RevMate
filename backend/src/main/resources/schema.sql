@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS materials (
     user_id BIGINT NOT NULL,
     filename VARCHAR(255) NOT NULL,
     type VARCHAR(20) NOT NULL COMMENT 'txt/pdf/word/image/audio',
+    storage_path VARCHAR(512) COMMENT '本地实际存储路径，内部使用',
     status VARCHAR(20) NOT NULL DEFAULT 'PROCESSING' COMMENT 'PROCESSING/READY/FAILED',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_user_id (user_id)
