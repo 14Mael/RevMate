@@ -25,6 +25,7 @@ public class FileProcessingService {
     private final MaterialRepository materialRepository;
     private final ExtractorRouter extractorRouter;
     private final DocumentIngestionService documentIngestionService;
+    private final PdfConversionService pdfConversionService;
 
     @Async
     public void processFile(Long userId, Long materialId, String filename, String type, Path filePath) {
@@ -37,13 +38,18 @@ public class FileProcessingService {
             // 切片 + 向量入库
             documentIngestionService.ingest(userId, materialId, filename, extractedText);
 
-            // 更新状态为 READY
+            // 计算预览 PDF 路径
+            String previewPath = resolvePreviewPath(type, filename, filePath);
+
+            // 更新状态为 READY 并保存 previewPath
             materialRepository.findById(materialId).ifPresent(material -> {
                 material.setStatus(Material.Status.READY);
+                material.setPreviewPath(previewPath);
                 materialRepository.save(material);
             });
 
-            log.info("资料处理完成: materialId={}, status=READY", materialId);
+            log.info("资料处理完成: materialId={}, previewable={}, status=READY",
+                    materialId, previewPath != null);
         } catch (Exception e) {
             log.error("资料处理失败: materialId={}", materialId, e);
             materialRepository.findById(materialId).ifPresent(material -> {
@@ -51,5 +57,24 @@ public class FileProcessingService {
                 materialRepository.save(material);
             });
         }
+    }
+
+    /**
+     * 计算预览 PDF 路径:
+     * pdf 直接用原文件;word/ppt/excel 转换;其他或失败返回 null。
+     */
+    private String resolvePreviewPath(String type, String filename, Path filePath) {
+        if ("pdf".equals(type)) {
+            return filePath.toString();
+        }
+        if (pdfConversionService.isConvertibleType(type)) {
+            try {
+                return pdfConversionService.convertToPdf(filePath, filename).toString();
+            } catch (Exception e) {
+                log.warn("生成预览 PDF 失败,跳过预览: type={}, file={}", type, filename, e);
+                return null;
+            }
+        }
+        return null;
     }
 }
