@@ -6,12 +6,15 @@ import com.team.study.extractor.ExtractorRouter;
 import com.team.study.repository.MaterialRepository;
 import com.team.study.security.SecurityUtil;
 import lombok.RequiredArgsConstructor;
+import org.apache.tika.Tika;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -23,15 +26,26 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MaterialServiceImpl implements MaterialService {
 
+    private static final Logger log = LoggerFactory.getLogger(MaterialServiceImpl.class);
+
     private final MaterialRepository materialRepository;
     private final ExtractorRouter extractorRouter;
     private final DocumentIngestionService documentIngestionService;
+    private final FileProcessingService fileProcessingService;
 
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
 
-    /** 允许的文件类型 */
-    private static final List<String> ALLOWED_TYPES = List.of("txt", "pdf", "word", "image");
+    /** 允许的文件 MIME 类型前缀（基于文件内容校验） */
+    private static final List<String> ALLOWED_MIME_TYPES = List.of(
+            "text/plain",
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/msword",
+            "image/"
+    );
+
+    private final Tika tika = new Tika();
 
     @Override
     public MaterialResponse upload(MultipartFile file) {
@@ -40,51 +54,35 @@ public class MaterialServiceImpl implements MaterialService {
             throw new IllegalArgumentException("未登录");
         }
 
-        String originalFilename = file.getOriginalFilename();
-        String extension = getExtension(originalFilename);
-        String type = mapToType(extension);
-
-        if (!ALLOWED_TYPES.contains(type)) {
-            throw new IllegalArgumentException("不支持的文件类型: " + extension);
+        // 1. MIME 类型校验（基于文件内容，不信任扩展名）
+        String mimeType = detectMimeType(file);
+        if (!isAllowedMimeType(mimeType)) {
+            log.warn("不支持的文件类型: mime={}, filename={}", mimeType, file.getOriginalFilename());
+            throw new IllegalArgumentException("不支持的文件类型: " + file.getOriginalFilename());
         }
+        String type = mimeTypeToContentType(mimeType);
 
-        // 保存文件到本地
+        // 2. 安全化文件名
+        String safeFilename = sanitizeFilename(file.getOriginalFilename());
+
+        // 3. 保存文件到本地
         try {
-            String storedFilename = UUID.randomUUID() + "_" + originalFilename;
+            String storedFilename = UUID.randomUUID() + "_" + safeFilename;
             Path userDir = Paths.get(uploadDir, userId.toString());
             Files.createDirectories(userDir);
             Path targetPath = userDir.resolve(storedFilename);
             file.transferTo(targetPath.toFile());
 
-            // 记录元信息
+            // 4. 记录元信息（初始状态 PROCESSING）
             Material material = new Material();
             material.setUserId(userId);
-            material.setFilename(originalFilename);
+            material.setFilename(safeFilename);
             material.setType(type);
-            material.setStoragePath(targetPath.toString());
             material.setStatus(Material.Status.PROCESSING);
             materialRepository.save(material);
 
-            // 异步执行：提取 → 切片 → 向量入库
-            try {
-                FileSystemResource resource = new FileSystemResource(targetPath);
-
-                // 1. 提取文本
-                String extractedText = extractorRouter.extract(type, resource);
-
-                // 2. 切片 + 向量入库
-                documentIngestionService.ingest(userId, material.getId(),
-                        originalFilename, extractedText);
-
-                // 3. 更新状态为 READY
-                material.setStatus(Material.Status.READY);
-                materialRepository.save(material);
-
-            } catch (Exception e) {
-                material.setStatus(Material.Status.FAILED);
-                materialRepository.save(material);
-                throw new RuntimeException("资料处理失败: " + e.getMessage(), e);
-            }
+            // 5. 异步处理：提取 → 切片 → 向量入库（不阻塞 HTTP 响应）
+            fileProcessingService.processFile(userId, material.getId(), safeFilename, type, targetPath);
 
             return toResponse(material);
         } catch (IOException e) {
@@ -117,25 +115,8 @@ public class MaterialServiceImpl implements MaterialService {
             throw new IllegalArgumentException("无权删除该资料");
         }
 
-        // 清理向量库中的切片
         documentIngestionService.removeByMaterial(material.getId());
-
-        deletePhysicalFile(material);
         materialRepository.delete(material);
-    }
-
-    /** 删除磁盘上的物理文件，best-effort：文件缺失或删除失败不阻断删库 */
-    private void deletePhysicalFile(Material material) {
-        String storagePath = material.getStoragePath();
-        if (storagePath == null || storagePath.isBlank()) {
-            return;
-        }
-        try {
-            Files.deleteIfExists(Paths.get(storagePath));
-        } catch (IOException e) {
-            // 文件删除失败不应阻断业务，记录后继续删库
-            System.err.println("删除物理文件失败: " + storagePath + " - " + e.getMessage());
-        }
     }
 
     private MaterialResponse toResponse(Material material) {
@@ -148,21 +129,55 @@ public class MaterialServiceImpl implements MaterialService {
         );
     }
 
-    private String getExtension(String filename) {
-        if (filename == null || !filename.contains(".")) {
-            return "";
+    /**
+     * 基于文件内容检测 MIME 类型
+     */
+    private String detectMimeType(MultipartFile file) {
+        try (InputStream is = file.getInputStream()) {
+            return tika.detect(is, file.getOriginalFilename());
+        } catch (IOException e) {
+            // 降级：用扩展名推断
+            String ext = getExtension(file.getOriginalFilename());
+            return switch (ext) {
+                case "txt" -> "text/plain";
+                case "pdf" -> "application/pdf";
+                case "doc" -> "application/msword";
+                case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                case "jpg", "jpeg" -> "image/jpeg";
+                case "png" -> "image/png";
+                case "gif" -> "image/gif";
+                case "bmp" -> "image/bmp";
+                case "webp" -> "image/webp";
+                default -> "application/octet-stream";
+            };
         }
-        return filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
     }
 
-    private String mapToType(String extension) {
-        return switch (extension) {
-            case "txt" -> "txt";
-            case "pdf" -> "pdf";
-            case "doc", "docx" -> "word";
-            case "jpg", "jpeg", "png", "gif", "bmp", "webp" -> "image";
-            case "mp3", "wav", "m4a", "ogg" -> "audio";
-            default -> "unknown";
-        };
+    private boolean isAllowedMimeType(String mimeType) {
+        return mimeType != null && ALLOWED_MIME_TYPES.stream().anyMatch(mimeType::startsWith);
+    }
+
+    private String mimeTypeToContentType(String mimeType) {
+        if (mimeType == null) return "unknown";
+        if (mimeType.startsWith("text/plain")) return "txt";
+        if (mimeType.startsWith("application/pdf")) return "pdf";
+        if (mimeType.startsWith("application/vnd.openxmlformats-officedocument.wordprocessingml") ||
+            mimeType.startsWith("application/msword")) return "word";
+        if (mimeType.startsWith("image/")) return "image";
+        return "unknown";
+    }
+
+    private String sanitizeFilename(String filename) {
+        if (filename == null) return UUID.randomUUID().toString();
+        String safe = filename.replaceAll("[/\\\\:<>\"|?*]", "_");
+        if (safe.length() > 200) {
+            safe = safe.substring(0, 200);
+        }
+        return safe;
+    }
+
+    private String getExtension(String filename) {
+        if (filename == null || !filename.contains(".")) return "";
+        return filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
     }
 }
