@@ -21,6 +21,10 @@ if not exist "%WRAPPER_JAR%" (
   if errorlevel 1 exit /b 1
 )
 
-java "-Dmaven.multiModuleProjectDirectory=%MAVEN_PROJECTBASEDIR%" -classpath "%WRAPPER_JAR%" org.apache.maven.wrapper.MavenWrapperMain %*
+@REM 优先用 JAVA_HOME 指定的 JDK（避免 IDE 等环境把别的 java 注入 PATH 最前导致用错版本）
+set JAVACMD=java
+if not "%JAVA_HOME%"=="" set JAVACMD=%JAVA_HOME%\bin\java
+
+"%JAVACMD%" "-Dmaven.multiModuleProjectDirectory=%MAVEN_PROJECTBASEDIR%" -classpath "%WRAPPER_JAR%" org.apache.maven.wrapper.MavenWrapperMain %*
 set MAVEN_EXIT_CODE=%ERRORLEVEL%
 endlocal & exit /b %MAVEN_EXIT_CODE%
