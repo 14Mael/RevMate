@@ -1,6 +1,5 @@
 package com.team.study.service;
 
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.team.study.dto.request.ChatRequest;
 import com.team.study.dto.response.ChatResponse;
 import com.team.study.dto.response.SourceItem;
@@ -21,7 +20,7 @@ import java.util.List;
  * 流程：
  * 1. 检索用户资料中的相关切片
  * 2. 命中足够 → 基于资料回答（带出处）
- * 3. 命中不足 → 联网搜索回答（带网页来源）
+ * 3. 命中不足 → 直接由 AI 回答（资料不足提示）
  */
 @Service
 @RequiredArgsConstructor
@@ -32,10 +31,7 @@ public class RagServiceImpl implements RagService {
     private final ChatClient chatClient;
     private final DocumentIngestionService documentIngestionService;
 
-    /** 检索返回的最相关切片数 */
     private static final int TOP_K = 5;
-
-    /** 最低命中数：低于此值则走联网兜底 */
     private static final int MIN_HITS = 1;
 
     @Override
@@ -52,19 +48,13 @@ public class RagServiceImpl implements RagService {
         List<Document> chunks = documentIngestionService.retrieve(userId, question, TOP_K);
 
         if (chunks != null && chunks.size() >= MIN_HITS) {
-            // 2. 命中资料 → 基于资料回答
             return answerFromMaterials(question, chunks, sources);
         } else {
-            // 3. 资料不足 → 联网搜索兜底
-            return answerFromWeb(question);
+            return answerNoData(question);
         }
     }
 
-    /**
-     * 基于检索到的资料切片回答问题
-     */
     private ChatResponse answerFromMaterials(String question, List<Document> chunks, List<SourceItem> sources) {
-        // 构建上下文
         StringBuilder contextBuilder = new StringBuilder();
         for (int i = 0; i < chunks.size(); i++) {
             Document chunk = chunks.get(i);
@@ -72,7 +62,6 @@ public class RagServiceImpl implements RagService {
                     .append(chunk.getText())
                     .append("\n\n");
 
-            // 构建来源信息
             sources.add(SourceItem.builder()
                     .type("material")
                     .title((String) chunk.getMetadata().getOrDefault("source", "未知资料"))
@@ -82,9 +71,6 @@ public class RagServiceImpl implements RagService {
                     .build());
         }
 
-        String context = contextBuilder.toString();
-
-        // 组装 prompt 并调用 AI
         String answer = chatClient.prompt()
                 .system("""
                         你是一个复习资料智能助手。请基于以下参考资料回答用户的问题。
@@ -93,7 +79,7 @@ public class RagServiceImpl implements RagService {
 
                         参考资料：
                         %s
-                        """.formatted(context))
+                        """.formatted(contextBuilder.toString()))
                 .user(question)
                 .call()
                 .content();
@@ -101,38 +87,16 @@ public class RagServiceImpl implements RagService {
         return new ChatResponse(answer != null ? answer : "", sources);
     }
 
-    /**
-     * 资料不足时，联网搜索回答
-     */
-    private ChatResponse answerFromWeb(String question) {
-        log.info("资料不足，启用联网搜索: question={}", question);
-
-        // 启用 DashScope 的联网搜索能力
-        DashScopeChatOptions options = DashScopeChatOptions.builder()
-                .withEnableSearch(true)
-                .build();
-
+    private ChatResponse answerNoData(String question) {
         String answer = chatClient.prompt()
-                .options(options)
-                .system("你是一个智能助手。用户的问题超出了现有复习资料的范围，请使用联网搜索能力来回答。")
+                .system("你是一个智能助手。用户的问题目前没有相关的复习资料，请根据你的知识回答。")
                 .user(question)
                 .call()
                 .content();
 
-        List<SourceItem> sources = List.of(
-                SourceItem.builder()
-                        .type("web")
-                        .title("联网搜索")
-                        .snippet("此回答来源于联网搜索，仅供参考")
-                        .build()
-        );
-
-        return new ChatResponse(answer != null ? answer : "", sources);
+        return new ChatResponse(answer != null ? answer : "", List.of());
     }
 
-    /**
-     * 截断文本到指定长度
-     */
     private String truncate(String text, int maxLen) {
         if (text == null) return "";
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";

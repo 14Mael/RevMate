@@ -1,6 +1,5 @@
 package com.team.study.extractor;
 
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -29,10 +28,6 @@ public class ImageExtractor implements ContentExtractor {
     @Override
     public String extract(Resource file) {
         try {
-            DashScopeChatOptions options = DashScopeChatOptions.builder()
-                    .withModel("qwen-vl-plus")
-                    .build();
-
             // 根据文件名推断 MIME 类型
             String filename = file.getFilename();
             String mimeString = switch (filename != null ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase() : "") {
@@ -53,7 +48,6 @@ public class ImageExtractor implements ContentExtractor {
                     .build();
 
             String result = visionChatClient.prompt()
-                    .options(options)
                     .messages(message)
                     .call()
                     .content();

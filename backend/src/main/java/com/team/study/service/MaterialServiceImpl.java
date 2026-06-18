@@ -5,6 +5,7 @@ import com.team.study.entity.Material;
 import com.team.study.extractor.ExtractorRouter;
 import com.team.study.repository.MaterialRepository;
 import com.team.study.security.SecurityUtil;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.apache.tika.Tika;
 import org.slf4j.Logger;
@@ -13,8 +14,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -47,6 +48,16 @@ public class MaterialServiceImpl implements MaterialService {
 
     private final Tika tika = new Tika();
 
+    @PostConstruct
+    public void init() {
+        // 将相对路径转为绝对路径
+        Path path = Paths.get(uploadDir);
+        if (!path.isAbsolute()) {
+            this.uploadDir = path.toAbsolutePath().normalize().toString();
+        }
+        log.info("上传目录: {}", uploadDir);
+    }
+
     @Override
     public MaterialResponse upload(MultipartFile file) {
         Long userId = SecurityUtil.getCurrentUserId();
@@ -54,40 +65,44 @@ public class MaterialServiceImpl implements MaterialService {
             throw new IllegalArgumentException("未登录");
         }
 
-        // 1. MIME 类型校验（基于文件内容，不信任扩展名）
-        String mimeType = detectMimeType(file);
+        // 1. 安全化文件名
+        String safeFilename = sanitizeFilename(file.getOriginalFilename());
+
+        // 2. 先保存文件到本地（再检测 MIME，避免流被消费）
+        String storedFilename;
+        Path targetPath;
+        try {
+            storedFilename = UUID.randomUUID() + "_" + safeFilename;
+            Path userDir = Paths.get(uploadDir, userId.toString());
+            Files.createDirectories(userDir);
+            targetPath = userDir.resolve(storedFilename);
+            file.transferTo(targetPath.toFile());
+        } catch (IOException e) {
+            throw new RuntimeException("文件上传失败", e);
+        }
+
+        // 3. 从已保存的文件检测 MIME 类型
+        String mimeType = detectMimeType(targetPath.toFile(), safeFilename);
         if (!isAllowedMimeType(mimeType)) {
+            // 删除已保存的文件
+            try { Files.deleteIfExists(targetPath); } catch (IOException ignored) {}
             log.warn("不支持的文件类型: mime={}, filename={}", mimeType, file.getOriginalFilename());
             throw new IllegalArgumentException("不支持的文件类型: " + file.getOriginalFilename());
         }
         String type = mimeTypeToContentType(mimeType);
 
-        // 2. 安全化文件名
-        String safeFilename = sanitizeFilename(file.getOriginalFilename());
+        // 4. 记录元信息（初始状态 PROCESSING）
+        Material material = new Material();
+        material.setUserId(userId);
+        material.setFilename(safeFilename);
+        material.setType(type);
+        material.setStatus(Material.Status.PROCESSING);
+        materialRepository.save(material);
 
-        // 3. 保存文件到本地
-        try {
-            String storedFilename = UUID.randomUUID() + "_" + safeFilename;
-            Path userDir = Paths.get(uploadDir, userId.toString());
-            Files.createDirectories(userDir);
-            Path targetPath = userDir.resolve(storedFilename);
-            file.transferTo(targetPath.toFile());
+        // 5. 异步处理：提取 → 切片 → 向量入库（不阻塞 HTTP 响应）
+        fileProcessingService.processFile(userId, material.getId(), safeFilename, type, targetPath);
 
-            // 4. 记录元信息（初始状态 PROCESSING）
-            Material material = new Material();
-            material.setUserId(userId);
-            material.setFilename(safeFilename);
-            material.setType(type);
-            material.setStatus(Material.Status.PROCESSING);
-            materialRepository.save(material);
-
-            // 5. 异步处理：提取 → 切片 → 向量入库（不阻塞 HTTP 响应）
-            fileProcessingService.processFile(userId, material.getId(), safeFilename, type, targetPath);
-
-            return toResponse(material);
-        } catch (IOException e) {
-            throw new RuntimeException("文件上传失败", e);
-        }
+        return toResponse(material);
     }
 
     @Override
@@ -130,14 +145,14 @@ public class MaterialServiceImpl implements MaterialService {
     }
 
     /**
-     * 基于文件内容检测 MIME 类型
+     * 基于已保存的文件内容检测 MIME 类型
      */
-    private String detectMimeType(MultipartFile file) {
-        try (InputStream is = file.getInputStream()) {
-            return tika.detect(is, file.getOriginalFilename());
+    private String detectMimeType(File file, String filename) {
+        try {
+            return tika.detect(file);
         } catch (IOException e) {
             // 降级：用扩展名推断
-            String ext = getExtension(file.getOriginalFilename());
+            String ext = getExtension(filename);
             return switch (ext) {
                 case "txt" -> "text/plain";
                 case "pdf" -> "application/pdf";
