@@ -33,7 +33,7 @@ spring:
 
 # JWT
 jwt:
-  secret: ${JWT_SECRET:RevMateDefaultSecretKeyForDevelopmentMustBeAtLeast256BitsLong!!}
+  secret: "${JWT_SECRET:RevMateDefaultSecretKeyForDevelopmentMustBeAtLeast256BitsLong!!}"
   expiration: 86400000  # 24 hours
 
 # 文件上传存储路径
