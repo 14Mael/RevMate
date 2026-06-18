@@ -4,7 +4,10 @@ import com.team.study.common.Result;
 import com.team.study.dto.response.MaterialResponse;
 import com.team.study.service.MaterialService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -33,5 +36,14 @@ public class MaterialController {
     public Result<Void> delete(@PathVariable Long id) {
         materialService.delete(id);
         return Result.success();
+    }
+
+    @GetMapping("/{id}/preview")
+    public ResponseEntity<Resource> preview(@PathVariable Long id) {
+        Resource resource = materialService.getPreviewResource(id);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                .body(resource);
     }
 }
