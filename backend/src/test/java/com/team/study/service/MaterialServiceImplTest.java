@@ -6,14 +6,13 @@ import com.team.study.repository.MaterialRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +21,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -91,5 +91,21 @@ class MaterialServiceImplTest {
                 .isInstanceOf(IllegalArgumentException.class);
         verify(materialRepository, never()).delete(m);
         assertThat(Files.exists(file)).isTrue();
+    }
+
+    @Test
+    void mimeTypeToContentType_mapsPptAndExcel() {
+        assertEquals("ppt", ReflectionTestUtils.invokeMethod(
+                materialService, "mimeTypeToContentType",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"));
+        assertEquals("ppt", ReflectionTestUtils.invokeMethod(
+                materialService, "mimeTypeToContentType",
+                "application/vnd.ms-powerpoint"));
+        assertEquals("excel", ReflectionTestUtils.invokeMethod(
+                materialService, "mimeTypeToContentType",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        assertEquals("excel", ReflectionTestUtils.invokeMethod(
+                materialService, "mimeTypeToContentType",
+                "application/vnd.ms-excel"));
     }
 }

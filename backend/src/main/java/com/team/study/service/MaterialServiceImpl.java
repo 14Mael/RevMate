@@ -43,6 +43,10 @@ public class MaterialServiceImpl implements MaterialService {
             "application/pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "application/msword",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-excel",
             "image/"
     );
 
@@ -173,6 +177,10 @@ public class MaterialServiceImpl implements MaterialService {
                 case "pdf" -> "application/pdf";
                 case "doc" -> "application/msword";
                 case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                case "ppt" -> "application/vnd.ms-powerpoint";
+                case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+                case "xls" -> "application/vnd.ms-excel";
+                case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
                 case "jpg", "jpeg" -> "image/jpeg";
                 case "png" -> "image/png";
                 case "gif" -> "image/gif";
@@ -193,6 +201,10 @@ public class MaterialServiceImpl implements MaterialService {
         if (mimeType.startsWith("application/pdf")) return "pdf";
         if (mimeType.startsWith("application/vnd.openxmlformats-officedocument.wordprocessingml") ||
             mimeType.startsWith("application/msword")) return "word";
+        if (mimeType.startsWith("application/vnd.openxmlformats-officedocument.presentationml") ||
+            mimeType.startsWith("application/vnd.ms-powerpoint")) return "ppt";
+        if (mimeType.startsWith("application/vnd.openxmlformats-officedocument.spreadsheetml") ||
+            mimeType.startsWith("application/vnd.ms-excel")) return "excel";
         if (mimeType.startsWith("image/")) return "image";
         return "unknown";
     }
