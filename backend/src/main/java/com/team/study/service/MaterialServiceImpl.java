@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -51,10 +52,13 @@ public class MaterialServiceImpl implements MaterialService {
         // 保存文件到本地
         try {
             String storedFilename = UUID.randomUUID() + "_" + originalFilename;
-            Path userDir = Paths.get(uploadDir, userId.toString());
+            // 用绝对路径：MultipartFile.transferTo 对相对路径会解析到 Tomcat 临时目录而非工作目录
+            Path userDir = Paths.get(uploadDir, userId.toString()).toAbsolutePath();
             Files.createDirectories(userDir);
             Path targetPath = userDir.resolve(storedFilename);
-            file.transferTo(targetPath.toFile());
+            try (var in = file.getInputStream()) {
+                Files.copy(in, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            }
 
             // 记录元信息
             Material material = new Material();
