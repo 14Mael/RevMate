@@ -24,7 +24,9 @@ public class TikaExtractor implements ContentExtractor {
     public boolean supports(String contentType) {
         return "txt".equals(contentType)
                 || "pdf".equals(contentType)
-                || "word".equals(contentType);
+                || "word".equals(contentType)
+                || "ppt".equals(contentType)
+                || "excel".equals(contentType);
     }
 
     @Override

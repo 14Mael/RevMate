@@ -23,7 +23,7 @@ public class ExtractorRouter {
     public void init() {
         // 为每个支持的 contentType 建立快速映射
         for (ContentExtractor extractor : extractors) {
-            for (String type : List.of("txt", "pdf", "word", "image")) {
+            for (String type : List.of("txt", "pdf", "word", "image", "ppt", "excel")) {
                 if (extractor.supports(type)) {
                     typeMapping.put(type, extractor);
                 }
