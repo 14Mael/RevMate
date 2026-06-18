@@ -1,12 +1,15 @@
 package com.team.study.service;
 
+import com.team.study.entity.MaterialChunk;
+import com.team.study.repository.MaterialChunkRepository;
+import com.team.study.repository.MaterialRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -18,25 +21,18 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentIngestionServiceImpl.class);
 
-    /** 内存存储：materialId → 切片列表 */
-    private final Map<Long, List<ChunkInfo>> store = new ConcurrentHashMap<>();
+    private final MaterialChunkRepository materialChunkRepository;
+    private final MaterialRepository materialRepository;
 
-    /** 存储切片信息 */
-    private static class ChunkInfo {
-        final String docId;
-        final String text;
-        final Long userId;
-        final String source;
-
-        ChunkInfo(String docId, String text, Long userId, String source) {
-            this.docId = docId;
-            this.text = text;
-            this.userId = userId;
-            this.source = source;
-        }
+    public DocumentIngestionServiceImpl(
+            MaterialChunkRepository materialChunkRepository,
+            MaterialRepository materialRepository) {
+        this.materialChunkRepository = materialChunkRepository;
+        this.materialRepository = materialRepository;
     }
 
     @Override
+    @Transactional
     public void ingest(Long userId, Long materialId, String sourceName, String text) {
         if (text == null || text.isBlank()) {
             log.warn("文本为空，跳过入库: materialId={}", materialId);
@@ -45,80 +41,97 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
 
         // 简单切片（按段落/句子切分）
         List<String> segments = splitText(text, 500);
-        List<ChunkInfo> chunks = new ArrayList<>();
+        List<MaterialChunk> chunks = new ArrayList<>();
 
         for (int i = 0; i < segments.size(); i++) {
             String chunkText = segments.get(i);
             if (chunkText.isBlank()) continue;
-            chunks.add(new ChunkInfo(
-                    materialId + "-" + i,
-                    chunkText,
-                    userId,
-                    sourceName
-            ));
+            MaterialChunk chunk = new MaterialChunk();
+            chunk.setMaterialId(materialId);
+            chunk.setUserId(userId);
+            chunk.setChunkIndex(i);
+            chunk.setText(chunkText);
+            chunk.setSource(sourceName != null ? sourceName : "未知资料");
+            chunks.add(chunk);
         }
 
-        store.put(materialId, chunks);
+        materialChunkRepository.deleteByMaterialId(materialId);
+        materialChunkRepository.saveAll(chunks);
         log.info("入库完成: materialId={}, 切片数={}", materialId, chunks.size());
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<Document> retrieve(Long userId, String query, int topK) {
+        return retrieveFromChunks(materialChunkRepository.findByUserId(userId), userId, query, topK);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Document> retrieve(Long userId, Long subjectId, String query, int topK) {
+        List<Long> materialIds = materialRepository.findIdsByUserIdAndSubjectId(userId, subjectId);
+        if (materialIds.isEmpty()) {
+            return List.of();
+        }
+        return retrieveFromChunks(
+                materialChunkRepository.findByUserIdAndMaterialIdIn(userId, materialIds),
+                userId,
+                query,
+                topK);
+    }
+
+    private List<Document> retrieveFromChunks(List<MaterialChunk> candidateChunks, Long userId, String query, int topK) {
         // 关键词检索（支持子串匹配，提高 OCR 容错）
         String[] keywords = query.toLowerCase().split("[\\s,，。.、？?！!；;：:()（）\"'\\[\\]{}]");
 
         List<Document> results = new ArrayList<>();
         String queryLower = query.toLowerCase();
 
-        for (Map.Entry<Long, List<ChunkInfo>> entry : store.entrySet()) {
-            for (ChunkInfo chunk : entry.getValue()) {
-                if (!chunk.userId.equals(userId)) continue;
+        for (MaterialChunk chunk : candidateChunks) {
+            String text = chunk.getText().toLowerCase();
+            String sourceInfo = chunk.getSource().toLowerCase();
+            int matchCount = 0;
+            int totalValidKeywords = 0;
 
-                String text = chunk.text.toLowerCase();
-                String sourceInfo = chunk.source.toLowerCase();
-                int matchCount = 0;
-                int totalValidKeywords = 0;
+            for (String kw : keywords) {
+                if (kw.length() < 2) continue;
+                totalValidKeywords++;
 
-                for (String kw : keywords) {
-                    if (kw.length() < 2) continue;
-                    totalValidKeywords++;
+                // 匹配文本内容
+                if (text.contains(kw)) {
+                    matchCount++;
+                    continue;
+                }
 
-                    // 匹配文本内容
-                    if (text.contains(kw)) {
+                // 匹配文件名（解决"图片里写了什么"这类问题）
+                if (sourceInfo.contains(kw)) {
+                    matchCount++;
+                    continue;
+                }
+
+                // 长关键词用子串匹配（提高 OCR 容错）
+                if (kw.length() >= 6) {
+                    String sub = kw.substring(0, Math.min(6, kw.length()));
+                    if (text.contains(sub)) {
                         matchCount++;
-                        continue;
-                    }
-
-                    // 匹配文件名（解决"图片里写了什么"这类问题）
-                    if (sourceInfo.contains(kw)) {
-                        matchCount++;
-                        continue;
-                    }
-
-                    // 长关键词用子串匹配（提高 OCR 容错）
-                    if (kw.length() >= 6) {
-                        String sub = kw.substring(0, Math.min(6, kw.length()));
-                        if (text.contains(sub)) {
-                            matchCount++;
-                        }
                     }
                 }
+            }
 
-                // 也检查整个查询是否在文本中
-                if (text.contains(queryLower)) {
-                    matchCount = Math.max(matchCount, totalValidKeywords);
-                }
+            // 也检查整个查询是否在文本中
+            if (text.contains(queryLower)) {
+                matchCount = Math.max(matchCount, totalValidKeywords);
+            }
 
-                if (matchCount > 0) {
-                    Document doc = new Document(chunk.text, Map.of(
-                            "userId", userId.toString(),
-                            "materialId", entry.getKey().toString(),
-                            "source", chunk.source
-                    ));
-                    double score = totalValidKeywords > 0 ? (double) matchCount / totalValidKeywords : 0;
-                    doc.getMetadata().put("score", score);
-                    results.add(doc);
-                }
+            if (matchCount > 0) {
+                Document doc = new Document(chunk.getText(), Map.of(
+                        "userId", userId.toString(),
+                        "materialId", chunk.getMaterialId().toString(),
+                        "source", chunk.getSource()
+                ));
+                double score = totalValidKeywords > 0 ? (double) matchCount / totalValidKeywords : 0;
+                doc.getMetadata().put("score", score);
+                results.add(doc);
             }
         }
 
@@ -138,20 +151,35 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public String getMaterialContext(Long userId, Long materialId, int maxChunks) {
-        List<ChunkInfo> chunks = store.get(materialId);
-        if (chunks == null) return "";
+        List<MaterialChunk> chunks = materialChunkRepository.findByMaterialIdOrderByChunkIndexAsc(materialId);
 
         return chunks.stream()
-                .filter(c -> c.userId.equals(userId))
+                .filter(c -> c.getUserId().equals(userId))
                 .limit(maxChunks)
-                .map(c -> c.text)
+                .map(MaterialChunk::getText)
                 .collect(Collectors.joining("\n\n---\n\n"));
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public String getSubjectContext(Long userId, Long subjectId, int maxChunks) {
+        List<Long> materialIds = materialRepository.findIdsByUserIdAndSubjectId(userId, subjectId);
+        if (materialIds.isEmpty()) {
+            return "";
+        }
+        return materialChunkRepository.findByUserIdAndMaterialIdInOrderByMaterialIdAscChunkIndexAsc(userId, materialIds)
+                .stream()
+                .limit(maxChunks)
+                .map(MaterialChunk::getText)
+                .collect(Collectors.joining("\n\n---\n\n"));
+    }
+
+    @Override
+    @Transactional
     public void removeByMaterial(Long materialId) {
-        store.remove(materialId);
+        materialChunkRepository.deleteByMaterialId(materialId);
         log.info("已清理资料: materialId={}", materialId);
     }
 

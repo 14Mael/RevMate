@@ -28,12 +28,29 @@ public interface DocumentIngestionService {
     List<Document> retrieve(Long userId, String query, int topK);
 
     /**
+     * 按用户、学科和查询检索相关切片
+     * @param userId 用户 ID（隔离）
+     * @param subjectId 学科 ID
+     * @param query 查询文本
+     * @param topK 返回条数
+     */
+    List<Document> retrieve(Long userId, Long subjectId, String query, int topK);
+
+    /**
      * 按资料获取代表性切片上下文（供出题使用）
      * @param userId     用户 ID
      * @param materialId 资料 ID
      * @param maxChunks  最大切片数
      */
     String getMaterialContext(Long userId, Long materialId, int maxChunks);
+
+    /**
+     * 按学科获取代表性切片上下文（供整学科出题使用）
+     * @param userId 用户 ID
+     * @param subjectId 学科 ID
+     * @param maxChunks 最大切片数
+     */
+    String getSubjectContext(Long userId, Long subjectId, int maxChunks);
 
     /**
      * 删除资料时清理对应的向量切片

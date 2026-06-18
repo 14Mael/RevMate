@@ -20,18 +20,16 @@
     <properties>
         <java.version>21</java.version>
         <spring-ai.version>1.0.0</spring-ai.version>
-        <spring-ai-alibaba.version>1.0.0.2</spring-ai-alibaba.version>
         <jjwt.version>0.12.6</jjwt.version>
         <lombok.version>1.18.46</lombok.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
-            <!-- spring-ai-alibaba-bom 已内含 spring-ai-bom，只需这一个 -->
             <dependency>
-                <groupId>com.alibaba.cloud.ai</groupId>
-                <artifactId>spring-ai-alibaba-bom</artifactId>
-                <version>${spring-ai-alibaba.version}</version>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -45,10 +43,10 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- Spring AI - DashScope (通义) -->
+        <!-- Spring AI - OpenAI compatible APIs (OpenAI / DeepSeek / DashScope compatible mode) -->
         <dependency>
-            <groupId>com.alibaba.cloud.ai</groupId>
-            <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
 
         <!-- Security -->

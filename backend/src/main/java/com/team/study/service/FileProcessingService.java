@@ -39,21 +39,25 @@ public class FileProcessingService {
             documentIngestionService.ingest(userId, materialId, filename, extractedText);
 
             // 计算预览 PDF 路径
-            String previewPath = resolvePreviewPath(type, filename, filePath);
+            PreviewResult preview = resolvePreview(type, filename, filePath);
 
             // 更新状态为 READY 并保存 previewPath
             materialRepository.findById(materialId).ifPresent(material -> {
                 material.setStatus(Material.Status.READY);
-                material.setPreviewPath(previewPath);
+                material.setPreviewPath(preview.path());
+                material.setPreviewStatus(preview.status());
+                material.setPreviewMessage(preview.message());
                 materialRepository.save(material);
             });
 
             log.info("资料处理完成: materialId={}, previewable={}, status=READY",
-                    materialId, previewPath != null);
+                    materialId, preview.path() != null);
         } catch (Exception e) {
             log.error("资料处理失败: materialId={}", materialId, e);
             materialRepository.findById(materialId).ifPresent(material -> {
                 material.setStatus(Material.Status.FAILED);
+                material.setPreviewStatus(Material.PreviewStatus.FAILED);
+                material.setPreviewMessage("资料处理失败，未生成预览");
                 materialRepository.save(material);
             });
         }
@@ -63,18 +67,28 @@ public class FileProcessingService {
      * 计算预览 PDF 路径:
      * pdf 直接用原文件;word/ppt/excel 转换;其他或失败返回 null。
      */
-    private String resolvePreviewPath(String type, String filename, Path filePath) {
+    private PreviewResult resolvePreview(String type, String filename, Path filePath) {
         if ("pdf".equals(type)) {
-            return filePath.toString();
+            return new PreviewResult(filePath.toString(), Material.PreviewStatus.READY, null);
         }
         if (pdfConversionService.isConvertibleType(type)) {
             try {
-                return pdfConversionService.convertToPdf(filePath, filename).toString();
+                return new PreviewResult(
+                        pdfConversionService.convertToPdf(filePath, filename).toString(),
+                        Material.PreviewStatus.READY,
+                        null);
             } catch (Exception e) {
-                log.warn("生成预览 PDF 失败,跳过预览: type={}, file={}", type, filename, e);
-                return null;
+                log.warn("生成预览 PDF 失败,跳过预览: type={}, file={}, reason={}",
+                        type, filename, e.getMessage());
+                return new PreviewResult(
+                        null,
+                        Material.PreviewStatus.FAILED,
+                        "PDF 预览生成失败，请确认已安装 LibreOffice 且文件未损坏");
             }
         }
-        return null;
+        return new PreviewResult(null, Material.PreviewStatus.NONE, null);
+    }
+
+    private record PreviewResult(String path, Material.PreviewStatus status, String message) {
     }
 }

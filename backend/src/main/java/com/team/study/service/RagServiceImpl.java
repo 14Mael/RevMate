@@ -3,6 +3,7 @@ package com.team.study.service;
 import com.team.study.dto.request.ChatRequest;
 import com.team.study.dto.response.ChatResponse;
 import com.team.study.dto.response.SourceItem;
+import com.team.study.repository.SubjectRepository;
 import com.team.study.security.SecurityUtil;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -30,6 +31,7 @@ public class RagServiceImpl implements RagService {
 
     private final ChatClient chatClient;
     private final DocumentIngestionService documentIngestionService;
+    private final SubjectRepository subjectRepository;
 
     private static final int TOP_K = 5;
     private static final int MIN_HITS = 1;
@@ -42,10 +44,14 @@ public class RagServiceImpl implements RagService {
         }
 
         String question = request.getQuestion();
+        Long subjectId = request.getSubjectId();
+        if (subjectId == null || !subjectRepository.existsByIdAndUserId(subjectId, userId)) {
+            throw new IllegalArgumentException("学科不存在或无权访问");
+        }
         List<SourceItem> sources = new ArrayList<>();
 
-        // 1. 检索用户自己的资料
-        List<Document> chunks = documentIngestionService.retrieve(userId, question, TOP_K);
+        // 1. 检索用户在当前学科下的资料
+        List<Document> chunks = documentIngestionService.retrieve(userId, subjectId, question, TOP_K);
 
         if (chunks != null && chunks.size() >= MIN_HITS) {
             return answerFromMaterials(question, chunks, sources);

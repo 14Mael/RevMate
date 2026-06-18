@@ -18,12 +18,19 @@ public class Material {
         PROCESSING, READY, FAILED
     }
 
+    public enum PreviewStatus {
+        NONE, PROCESSING, READY, FAILED
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "user_id", nullable = false)
     private Long userId;
+
+    @Column(name = "subject_id")
+    private Long subjectId;
 
     @Column(nullable = false)
     private String filename;
@@ -40,6 +47,13 @@ public class Material {
     private String previewPath;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "preview_status", length = 20)
+    private PreviewStatus previewStatus;
+
+    @Column(name = "preview_message", length = 255)
+    private String previewMessage;
+
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Status status;
 
@@ -51,6 +65,9 @@ public class Material {
         this.createdAt = LocalDateTime.now();
         if (this.status == null) {
             this.status = Status.PROCESSING;
+        }
+        if (this.previewStatus == null) {
+            this.previewStatus = PreviewStatus.NONE;
         }
     }
 }

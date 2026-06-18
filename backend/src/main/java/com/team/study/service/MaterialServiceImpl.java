@@ -4,6 +4,7 @@ import com.team.study.dto.response.MaterialResponse;
 import com.team.study.entity.Material;
 import com.team.study.extractor.ExtractorRouter;
 import com.team.study.repository.MaterialRepository;
+import com.team.study.repository.SubjectRepository;
 import com.team.study.security.SecurityUtil;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +34,7 @@ public class MaterialServiceImpl implements MaterialService {
     private final ExtractorRouter extractorRouter;
     private final DocumentIngestionService documentIngestionService;
     private final FileProcessingService fileProcessingService;
+    private final SubjectRepository subjectRepository;
 
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
@@ -47,7 +49,8 @@ public class MaterialServiceImpl implements MaterialService {
             "application/vnd.ms-powerpoint",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "application/vnd.ms-excel",
-            "image/"
+            "image/",
+            "audio/"
     );
 
     private final Tika tika = new Tika();
@@ -63,11 +66,12 @@ public class MaterialServiceImpl implements MaterialService {
     }
 
     @Override
-    public MaterialResponse upload(MultipartFile file) {
+    public MaterialResponse upload(MultipartFile file, Long subjectId) {
         Long userId = SecurityUtil.getCurrentUserId();
         if (userId == null) {
             throw new IllegalArgumentException("未登录");
         }
+        validateSubject(userId, subjectId);
 
         // 1. 安全化文件名
         String safeFilename = sanitizeFilename(file.getOriginalFilename());
@@ -98,10 +102,12 @@ public class MaterialServiceImpl implements MaterialService {
         // 4. 记录元信息（初始状态 PROCESSING）
         Material material = new Material();
         material.setUserId(userId);
+        material.setSubjectId(subjectId);
         material.setFilename(safeFilename);
         material.setType(type);
         material.setStoragePath(targetPath.toString());
         material.setStatus(Material.Status.PROCESSING);
+        material.setPreviewStatus(initialPreviewStatus(type));
         materialRepository.save(material);
 
         // 5. 异步处理：提取 → 切片 → 向量入库（不阻塞 HTTP 响应）
@@ -111,12 +117,13 @@ public class MaterialServiceImpl implements MaterialService {
     }
 
     @Override
-    public List<MaterialResponse> list() {
+    public List<MaterialResponse> list(Long subjectId) {
         Long userId = SecurityUtil.getCurrentUserId();
         if (userId == null) {
             throw new IllegalArgumentException("未登录");
         }
-        return materialRepository.findByUserIdOrderByCreatedAtDesc(userId)
+        validateSubject(userId, subjectId);
+        return materialRepository.findByUserIdAndSubjectIdOrderByCreatedAtDesc(userId, subjectId)
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
@@ -153,7 +160,9 @@ public class MaterialServiceImpl implements MaterialService {
         }
         String previewPath = material.getPreviewPath();
         if (previewPath == null || previewPath.isBlank()) {
-            throw new IllegalArgumentException("预览不可用");
+            String message = material.getPreviewMessage();
+            throw new IllegalArgumentException(
+                    message == null || message.isBlank() ? "预览不可用" : message);
         }
         return new org.springframework.core.io.FileSystemResource(previewPath);
     }
@@ -182,39 +191,44 @@ public class MaterialServiceImpl implements MaterialService {
     private MaterialResponse toResponse(Material material) {
         return new MaterialResponse(
                 material.getId(),
+                material.getSubjectId(),
                 material.getFilename(),
                 material.getType(),
                 material.getStatus().name(),
                 material.getCreatedAt(),
-                material.getPreviewPath() != null
+                material.getPreviewPath() != null,
+                material.getPreviewStatus() != null ? material.getPreviewStatus().name() : Material.PreviewStatus.NONE.name(),
+                material.getPreviewMessage()
         );
+    }
+
+    private Material.PreviewStatus initialPreviewStatus(String type) {
+        return switch (type) {
+            case "pdf", "word", "ppt", "excel" -> Material.PreviewStatus.PROCESSING;
+            default -> Material.PreviewStatus.NONE;
+        };
+    }
+
+    private void validateSubject(Long userId, Long subjectId) {
+        if (subjectId == null) {
+            throw new IllegalArgumentException("subjectId 不能为空");
+        }
+        if (!subjectRepository.existsByIdAndUserId(subjectId, userId)) {
+            throw new IllegalArgumentException("学科不存在或无权访问");
+        }
     }
 
     /**
      * 基于已保存的文件内容检测 MIME 类型
      */
     private String detectMimeType(File file, String filename) {
+        if (file == null || !file.isFile()) {
+            return detectMimeTypeByExtension(filename);
+        }
         try {
             return tika.detect(file);
         } catch (IOException e) {
-            // 降级：用扩展名推断
-            String ext = getExtension(filename);
-            return switch (ext) {
-                case "txt" -> "text/plain";
-                case "pdf" -> "application/pdf";
-                case "doc" -> "application/msword";
-                case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-                case "ppt" -> "application/vnd.ms-powerpoint";
-                case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-                case "xls" -> "application/vnd.ms-excel";
-                case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-                case "jpg", "jpeg" -> "image/jpeg";
-                case "png" -> "image/png";
-                case "gif" -> "image/gif";
-                case "bmp" -> "image/bmp";
-                case "webp" -> "image/webp";
-                default -> "application/octet-stream";
-            };
+            return detectMimeTypeByExtension(filename);
         }
     }
 
@@ -233,7 +247,33 @@ public class MaterialServiceImpl implements MaterialService {
         if (mimeType.startsWith("application/vnd.openxmlformats-officedocument.spreadsheetml") ||
             mimeType.startsWith("application/vnd.ms-excel")) return "excel";
         if (mimeType.startsWith("image/")) return "image";
+        if (mimeType.startsWith("audio/")) return "audio";
         return "unknown";
+    }
+
+    private String detectMimeTypeByExtension(String filename) {
+        String ext = getExtension(filename);
+        return switch (ext) {
+            case "txt" -> "text/plain";
+            case "pdf" -> "application/pdf";
+            case "doc" -> "application/msword";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "ppt" -> "application/vnd.ms-powerpoint";
+            case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            case "xls" -> "application/vnd.ms-excel";
+            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "png" -> "image/png";
+            case "gif" -> "image/gif";
+            case "bmp" -> "image/bmp";
+            case "webp" -> "image/webp";
+            case "mp3" -> "audio/mpeg";
+            case "wav" -> "audio/wav";
+            case "m4a" -> "audio/mp4";
+            case "webm" -> "audio/webm";
+            case "ogg" -> "audio/ogg";
+            default -> "application/octet-stream";
+        };
     }
 
     private String sanitizeFilename(String filename) {

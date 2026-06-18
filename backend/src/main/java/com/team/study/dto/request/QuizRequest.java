@@ -8,7 +8,9 @@ import lombok.Data;
 
 @Data
 public class QuizRequest {
-    @NotNull(message = "materialId 不能为空")
+    @NotNull(message = "subjectId 不能为空")
+    private Long subjectId;
+
     private Long materialId;
 
     @NotBlank(message = "题型不能为空")

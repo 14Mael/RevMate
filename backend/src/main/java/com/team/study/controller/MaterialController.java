@@ -21,14 +21,16 @@ public class MaterialController {
     private final MaterialService materialService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Result<MaterialResponse> upload(@RequestParam("file") MultipartFile file) {
-        MaterialResponse response = materialService.upload(file);
+    public Result<MaterialResponse> upload(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("subjectId") Long subjectId) {
+        MaterialResponse response = materialService.upload(file, subjectId);
         return Result.success(response);
     }
 
     @GetMapping
-    public Result<List<MaterialResponse>> list() {
-        List<MaterialResponse> list = materialService.list();
+    public Result<List<MaterialResponse>> list(@RequestParam("subjectId") Long subjectId) {
+        List<MaterialResponse> list = materialService.list(subjectId);
         return Result.success(list);
     }
 

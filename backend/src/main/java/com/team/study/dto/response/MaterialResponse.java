@@ -9,9 +9,12 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class MaterialResponse {
     private Long id;
+    private Long subjectId;
     private String filename;
     private String type;
     private String status;
     private LocalDateTime createdAt;
     private boolean previewable;
+    private String previewStatus;
+    private String previewMessage;
 }

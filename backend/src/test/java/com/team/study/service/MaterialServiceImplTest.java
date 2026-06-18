@@ -3,6 +3,7 @@ package com.team.study.service;
 import com.team.study.entity.Material;
 import com.team.study.extractor.ExtractorRouter;
 import com.team.study.repository.MaterialRepository;
+import com.team.study.repository.SubjectRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +18,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,9 +38,13 @@ class MaterialServiceImplTest {
     @Mock
     private MaterialRepository materialRepository;
     @Mock
+    private SubjectRepository subjectRepository;
+    @Mock
     private ExtractorRouter extractorRouter;
     @Mock
     private DocumentIngestionService documentIngestionService;
+    @Mock
+    private FileProcessingService fileProcessingService;
     @InjectMocks
     private MaterialServiceImpl materialService;
 
@@ -114,6 +120,40 @@ class MaterialServiceImplTest {
     }
 
     @Test
+    void mimeTypeToContentType_mapsAudio() {
+        assertEquals("audio", ReflectionTestUtils.invokeMethod(
+                materialService, "mimeTypeToContentType", "audio/mpeg"));
+        assertEquals("audio", ReflectionTestUtils.invokeMethod(
+                materialService, "mimeTypeToContentType", "audio/wav"));
+        assertEquals("audio", ReflectionTestUtils.invokeMethod(
+                materialService, "mimeTypeToContentType", "audio/webm"));
+    }
+
+    @Test
+    void isAllowedMimeType_acceptsAudio() {
+        assertThat((Boolean) ReflectionTestUtils.invokeMethod(
+                materialService, "isAllowedMimeType", "audio/mpeg")).isTrue();
+        assertThat((Boolean) ReflectionTestUtils.invokeMethod(
+                materialService, "isAllowedMimeType", "audio/wav")).isTrue();
+    }
+
+    @Test
+    void detectMimeType_fallsBackForAudioExtensions() {
+        Path missing = uploadRoot.resolve("lecture.mp3");
+
+        assertEquals("audio/mpeg", ReflectionTestUtils.invokeMethod(
+                materialService, "detectMimeType", missing.toFile(), "lecture.mp3"));
+        assertEquals("audio/wav", ReflectionTestUtils.invokeMethod(
+                materialService, "detectMimeType", missing.toFile(), "lecture.wav"));
+        assertEquals("audio/mp4", ReflectionTestUtils.invokeMethod(
+                materialService, "detectMimeType", missing.toFile(), "lecture.m4a"));
+        assertEquals("audio/webm", ReflectionTestUtils.invokeMethod(
+                materialService, "detectMimeType", missing.toFile(), "lecture.webm"));
+        assertEquals("audio/ogg", ReflectionTestUtils.invokeMethod(
+                materialService, "detectMimeType", missing.toFile(), "lecture.ogg"));
+    }
+
+    @Test
     void getPreviewResource_throwsWhenNoPreview() throws Exception {
         Path file = uploadRoot.resolve("5").resolve("abc_doc.docx");
         Files.createDirectories(file.getParent());
@@ -165,5 +205,49 @@ class MaterialServiceImplTest {
             assertThat(resource).isNotNull();
             assertThat(resource.exists()).isTrue();
         }
+    }
+
+    @Test
+    void listReturnsPreviewStatusAndMessage() {
+        loginAs(5L);
+        Material m = storedMaterial(10L, 5L, uploadRoot.resolve("5").resolve("abc_doc.docx"));
+        m.setSubjectId(7L);
+        m.setPreviewStatus(Material.PreviewStatus.FAILED);
+        m.setPreviewMessage("PDF 预览生成失败，请确认已安装 LibreOffice");
+        when(subjectRepository.existsByIdAndUserId(7L, 5L)).thenReturn(true);
+        when(materialRepository.findByUserIdAndSubjectIdOrderByCreatedAtDesc(5L, 7L)).thenReturn(List.of(m));
+
+        try (MockedStatic<SecurityUtil> securityMock = mockStatic(SecurityUtil.class)) {
+            securityMock.when(SecurityUtil::getCurrentUserId).thenReturn(5L);
+            var list = materialService.list(7L);
+
+            assertThat(list).hasSize(1);
+            assertThat(list.getFirst().getSubjectId()).isEqualTo(7L);
+            assertThat(list.getFirst().getPreviewStatus()).isEqualTo("FAILED");
+            assertThat(list.getFirst().getPreviewMessage()).contains("LibreOffice");
+            assertThat(list.getFirst().isPreviewable()).isFalse();
+        }
+    }
+
+    @Test
+    void listRejectsSubjectOwnedByAnotherUser() {
+        loginAs(5L);
+        when(subjectRepository.existsByIdAndUserId(7L, 5L)).thenReturn(false);
+
+        try (MockedStatic<SecurityUtil> securityMock = mockStatic(SecurityUtil.class)) {
+            securityMock.when(SecurityUtil::getCurrentUserId).thenReturn(5L);
+            assertThatThrownBy(() -> materialService.list(7L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("学科不存在或无权访问");
+        }
+    }
+
+    @Test
+    void uploadRejectsMissingSubject() {
+        loginAs(5L);
+
+        assertThatThrownBy(() -> materialService.upload(null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("subjectId 不能为空");
     }
 }

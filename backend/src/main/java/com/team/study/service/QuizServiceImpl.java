@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.team.study.dto.request.QuizRequest;
 import com.team.study.dto.response.QuestionItem;
 import com.team.study.dto.response.QuizResponse;
+import com.team.study.repository.MaterialRepository;
+import com.team.study.repository.SubjectRepository;
 import com.team.study.security.SecurityUtil;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -30,6 +32,8 @@ public class QuizServiceImpl implements QuizService {
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final DocumentIngestionService documentIngestionService;
+    private final SubjectRepository subjectRepository;
+    private final MaterialRepository materialRepository;
 
     // ---- 三套 Prompt 模板 ----
 
@@ -102,8 +106,23 @@ public class QuizServiceImpl implements QuizService {
             throw new IllegalArgumentException("未登录");
         }
 
-        String context = documentIngestionService.getMaterialContext(
-                userId, request.getMaterialId(), MATERIAL_CONTEXT_CHUNKS);
+        Long subjectId = request.getSubjectId();
+        if (subjectId == null || !subjectRepository.existsByIdAndUserId(subjectId, userId)) {
+            throw new IllegalArgumentException("学科不存在或无权访问");
+        }
+
+        String context;
+        Long materialId = request.getMaterialId();
+        if (materialId != null) {
+            if (!materialRepository.existsByIdAndUserIdAndSubjectId(materialId, userId, subjectId)) {
+                throw new IllegalArgumentException("资料不存在或不属于该学科");
+            }
+            context = documentIngestionService.getMaterialContext(
+                    userId, materialId, MATERIAL_CONTEXT_CHUNKS);
+        } else {
+            context = documentIngestionService.getSubjectContext(
+                    userId, subjectId, MATERIAL_CONTEXT_CHUNKS);
+        }
         if (context == null || context.isBlank()) {
             throw new IllegalArgumentException("资料未处理完成或没有可用文本，请稍后再试");
         }

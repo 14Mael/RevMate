@@ -3,6 +3,8 @@ package com.team.study.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.team.study.dto.request.QuizRequest;
 import com.team.study.dto.response.QuizResponse;
+import com.team.study.repository.MaterialRepository;
+import com.team.study.repository.SubjectRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +33,10 @@ class QuizServiceImplTest {
 
     @Mock
     private DocumentIngestionService documentIngestionService;
+    @Mock
+    private SubjectRepository subjectRepository;
+    @Mock
+    private MaterialRepository materialRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -42,8 +48,11 @@ class QuizServiceImplTest {
     @Test
     void generateUsesMaterialContextFromUploadedDocument() {
         loginAs(7L);
-        QuizServiceImpl quizService = new QuizServiceImpl(chatClient, objectMapper, documentIngestionService);
-        QuizRequest request = request(99L, "single", 1);
+        QuizServiceImpl quizService = new QuizServiceImpl(
+                chatClient, objectMapper, documentIngestionService, subjectRepository, materialRepository);
+        QuizRequest request = request(3L, 99L, "single", 1);
+        when(subjectRepository.existsByIdAndUserId(3L, 7L)).thenReturn(true);
+        when(materialRepository.existsByIdAndUserIdAndSubjectId(99L, 7L, 3L)).thenReturn(true);
         when(documentIngestionService.getMaterialContext(7L, 99L, 8))
                 .thenReturn("这是用户上传资料中的专属考点：操作系统的进程调度。");
         var requestSpec = chatClient.prompt();
@@ -74,8 +83,11 @@ class QuizServiceImplTest {
     @Test
     void generateRejectsEmptyMaterialContext() {
         loginAs(7L);
-        QuizServiceImpl quizService = new QuizServiceImpl(chatClient, objectMapper, documentIngestionService);
-        QuizRequest request = request(99L, "fill", 1);
+        QuizServiceImpl quizService = new QuizServiceImpl(
+                chatClient, objectMapper, documentIngestionService, subjectRepository, materialRepository);
+        QuizRequest request = request(3L, 99L, "fill", 1);
+        when(subjectRepository.existsByIdAndUserId(3L, 7L)).thenReturn(true);
+        when(materialRepository.existsByIdAndUserIdAndSubjectId(99L, 7L, 3L)).thenReturn(true);
         when(documentIngestionService.getMaterialContext(7L, 99L, 8)).thenReturn("  ");
 
         assertThatThrownBy(() -> quizService.generate(request))
@@ -83,13 +95,58 @@ class QuizServiceImplTest {
                 .hasMessageContaining("资料未处理完成");
     }
 
+    @Test
+    void generateUsesSubjectContextWhenMaterialIdAbsent() {
+        loginAs(7L);
+        QuizServiceImpl quizService = new QuizServiceImpl(
+                chatClient, objectMapper, documentIngestionService, subjectRepository, materialRepository);
+        QuizRequest request = request(3L, null, "single", 1);
+        when(subjectRepository.existsByIdAndUserId(3L, 7L)).thenReturn(true);
+        when(documentIngestionService.getSubjectContext(7L, 3L, 8))
+                .thenReturn("Java 封装使用 private 字段。");
+        var requestSpec = chatClient.prompt();
+        when(chatClient.prompt().user(anyString()).call().content())
+                .thenReturn("""
+                        [
+                          {
+                            "stem": "Java 封装通常使用什么访问修饰符隐藏字段？",
+                            "options": ["A. public", "B. private", "C. static", "D. final"],
+                            "answer": "B",
+                            "analysis": "资料中提到封装使用 private 字段。"
+                          }
+                        ]
+                        """);
+        clearInvocations(requestSpec);
+
+        QuizResponse response = quizService.generate(request);
+
+        verify(documentIngestionService).getSubjectContext(7L, 3L, 8);
+        assertThat(response.getQuestions()).hasSize(1);
+        assertThat(response.getQuestions().getFirst().getAnswer()).isEqualTo("B");
+    }
+
+    @Test
+    void generateRejectsMaterialOutsideSubject() {
+        loginAs(7L);
+        QuizServiceImpl quizService = new QuizServiceImpl(
+                chatClient, objectMapper, documentIngestionService, subjectRepository, materialRepository);
+        QuizRequest request = request(3L, 99L, "single", 1);
+        when(subjectRepository.existsByIdAndUserId(3L, 7L)).thenReturn(true);
+        when(materialRepository.existsByIdAndUserIdAndSubjectId(99L, 7L, 3L)).thenReturn(false);
+
+        assertThatThrownBy(() -> quizService.generate(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("资料不存在或不属于该学科");
+    }
+
     private void loginAs(Long userId) {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(userId, null, Collections.emptyList()));
     }
 
-    private QuizRequest request(Long materialId, String type, int count) {
+    private QuizRequest request(Long subjectId, Long materialId, String type, int count) {
         QuizRequest request = new QuizRequest();
+        request.setSubjectId(subjectId);
         request.setMaterialId(materialId);
         request.setType(type);
         request.setCount(count);
