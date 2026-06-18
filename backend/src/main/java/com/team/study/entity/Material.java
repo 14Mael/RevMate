@@ -35,6 +35,10 @@ public class Material {
     @Column(name = "storage_path", length = 512)
     private String storagePath;
 
+    /** 预览用 PDF 的本地路径;pdf 类型为原文件路径,不支持预览或转换失败为 null */
+    @Column(name = "preview_path", length = 512)
+    private String previewPath;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Status status;
