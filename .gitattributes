@@ -1,6 +1,0 @@
-# Windows 批处理脚本必须用 CRLF，否则 cmd.exe 无法正确解析
-*.cmd text eol=crlf
-*.bat text eol=crlf
-# Unix shell 脚本保持 LF
-*.sh text eol=lf
-mvnw text eol=lf

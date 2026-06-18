@@ -8,11 +8,17 @@ import java.io.InputStream;
 
 /**
  * Apache Tika 提取器 — 支持 txt / pdf / word
+ * PDF 提取为空时自动调用视觉模型 OCR 兜底
  */
 @Component
 public class TikaExtractor implements ContentExtractor {
 
     private final Tika tika = new Tika();
+    private final PdfOcrService pdfOcrService;
+
+    public TikaExtractor(PdfOcrService pdfOcrService) {
+        this.pdfOcrService = pdfOcrService;
+    }
 
     @Override
     public boolean supports(String contentType) {
@@ -24,7 +30,17 @@ public class TikaExtractor implements ContentExtractor {
     @Override
     public String extract(Resource file) {
         try (InputStream inputStream = file.getInputStream()) {
-            return tika.parseToString(inputStream);
+            String text = tika.parseToString(inputStream);
+
+            // PDF 提取为空 → 调用视觉模型 OCR
+            if (text == null || text.isBlank()) {
+                String filename = file.getFilename();
+                if (filename != null && filename.toLowerCase().endsWith(".pdf")) {
+                    return pdfOcrService.extractTextFromPdf(file.getFile().toPath());
+                }
+            }
+
+            return text;
         } catch (Exception e) {
             throw new RuntimeException("Tika 提取文本失败: " + file.getFilename(), e);
         }
