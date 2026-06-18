@@ -40,3 +40,9 @@ jwt:
 app:
   upload:
     dir: uploads
+
+# JODConverter + LibreOffice
+jodconverter:
+  local:
+    enabled: true
+    max-tasks-per-process: 100
