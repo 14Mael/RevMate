@@ -158,16 +158,24 @@ public class MaterialServiceImpl implements MaterialService {
         return new org.springframework.core.io.FileSystemResource(previewPath);
     }
 
-    /** 删除磁盘上的物理文件，best-effort：文件缺失或删除失败不阻断删库 */
+    /** 删除磁盘上的物理文件（含预览 PDF），best-effort：文件缺失或删除失败不阻断删库 */
     private void deletePhysicalFile(Material material) {
-        String storagePath = material.getStoragePath();
-        if (storagePath == null || storagePath.isBlank()) {
+        deleteQuietly(material.getStoragePath());
+        String previewPath = material.getPreviewPath();
+        // 当 previewPath != storagePath 时才单独删（pdf 类型两者相同，避免重复删）
+        if (previewPath != null && !previewPath.equals(material.getStoragePath())) {
+            deleteQuietly(previewPath);
+        }
+    }
+
+    private void deleteQuietly(String path) {
+        if (path == null || path.isBlank()) {
             return;
         }
         try {
-            Files.deleteIfExists(Paths.get(storagePath));
+            Files.deleteIfExists(Paths.get(path));
         } catch (IOException e) {
-            log.warn("删除物理文件失败: {}", storagePath, e);
+            log.warn("删除物理文件失败: {}", path, e);
         }
     }
 
