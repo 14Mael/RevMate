@@ -2,10 +2,12 @@ package com.team.study.service;
 
 import com.team.study.dto.response.MaterialResponse;
 import com.team.study.entity.Material;
+import com.team.study.extractor.ExtractorRouter;
 import com.team.study.repository.MaterialRepository;
 import com.team.study.security.SecurityUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,6 +24,8 @@ import java.util.stream.Collectors;
 public class MaterialServiceImpl implements MaterialService {
 
     private final MaterialRepository materialRepository;
+    private final ExtractorRouter extractorRouter;
+    private final DocumentIngestionService documentIngestionService;
 
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
@@ -60,7 +64,26 @@ public class MaterialServiceImpl implements MaterialService {
             material.setStatus(Material.Status.PROCESSING);
             materialRepository.save(material);
 
-            // TODO 交接点 A: 触发成员2 的 ingest(userId, materialId, file)
+            // 异步执行：提取 → 切片 → 向量入库
+            try {
+                FileSystemResource resource = new FileSystemResource(targetPath);
+
+                // 1. 提取文本
+                String extractedText = extractorRouter.extract(type, resource);
+
+                // 2. 切片 + 向量入库
+                documentIngestionService.ingest(userId, material.getId(),
+                        originalFilename, extractedText);
+
+                // 3. 更新状态为 READY
+                material.setStatus(Material.Status.READY);
+                materialRepository.save(material);
+
+            } catch (Exception e) {
+                material.setStatus(Material.Status.FAILED);
+                materialRepository.save(material);
+                throw new RuntimeException("资料处理失败: " + e.getMessage(), e);
+            }
 
             return toResponse(material);
         } catch (IOException e) {
@@ -93,7 +116,8 @@ public class MaterialServiceImpl implements MaterialService {
             throw new IllegalArgumentException("无权删除该资料");
         }
 
-        // TODO 交接点 A: 调用成员2 的 removeByMaterial(materialId) 清理向量
+        // 清理向量库中的切片
+        documentIngestionService.removeByMaterial(material.getId());
 
         materialRepository.delete(material);
     }
