@@ -25,8 +25,11 @@ import java.util.Map;
 public class QuizServiceImpl implements QuizService {
 
     private static final Logger log = LoggerFactory.getLogger(QuizServiceImpl.class);
+    private static final int MATERIAL_CONTEXT_CHUNKS = 8;
+
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final DocumentIngestionService documentIngestionService;
 
     // ---- 三套 Prompt 模板 ----
 
@@ -92,30 +95,6 @@ public class QuizServiceImpl implements QuizService {
             ]
             """;
 
-    // ======== 硬编码复习文本（交接点 B 前用于调试，后续替换为真实检索） ========
-
-    private static final String HARDCORE_CONTEXT = """
-            人工智能（Artificial Intelligence，缩写 AI）是计算机科学的一个分支，它企图了解智能的实质，
-            并生产出一种能以人类智能相似的方式做出反应的智能机器。该领域的研究包括机器人、语言识别、
-            图像识别、自然语言处理和专家系统等。
-            
-            机器学习是人工智能的核心，它使计算机能够在没有明确编程的情况下学习。主要的机器学习方法包括
-            监督学习、无监督学习和强化学习。
-            
-            监督学习使用带标签的训练数据，即每个训练样本都有一个已知的输出值或目标值。常见的监督学习算法
-            包括线性回归、逻辑回归、决策树和支持向量机。
-            
-            无监督学习则处理没有标签的数据，其目标是发现数据中的隐藏结构。常见的无监督学习方法包括
-            聚类算法（如 K-means）和降维算法（如主成分分析 PCA）。
-            
-            深度学习是机器学习的一个子集，它使用多层神经网络来学习数据的层次化表示。卷积神经网络（CNN）
-            擅长处理图像数据，而循环神经网络（RNN）和 Transformer 架构擅长处理序列数据。
-            
-            Transformer 架构于 2017 年由 Google 提出，它基于自注意力机制（Self-Attention），
-            摒弃了传统的循环结构，实现了更好的并行性和长距离依赖处理。GPT 和 BERT 等大语言模型
-            都是基于 Transformer 架构构建的。
-            """;
-
     @Override
     public QuizResponse generate(QuizRequest request) {
         Long userId = SecurityUtil.getCurrentUserId();
@@ -123,8 +102,11 @@ public class QuizServiceImpl implements QuizService {
             throw new IllegalArgumentException("未登录");
         }
 
-        // TODO 交接点 B 后替换：RagService.getMaterialContext(userId, request.getMaterialId(), maxChunks)
-        String context = HARDCORE_CONTEXT;
+        String context = documentIngestionService.getMaterialContext(
+                userId, request.getMaterialId(), MATERIAL_CONTEXT_CHUNKS);
+        if (context == null || context.isBlank()) {
+            throw new IllegalArgumentException("资料未处理完成或没有可用文本，请稍后再试");
+        }
 
         // 选择 prompt 模板
         String promptTemplate = switch (request.getType()) {
