@@ -14,11 +14,13 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.document.Document;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -42,6 +44,75 @@ class RagServiceImplTest {
     @AfterEach
     void clearContext() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void reliableMaterialScoreAcceptsVectorScoreAboveThreshold() {
+        Document chunk = ragChunk(Map.of("vectorScore", 0.6, "keywordScore", 0.0));
+
+        assertThat(RagServiceImpl.hasReliableMaterialScore(List.of(chunk))).isTrue();
+    }
+
+    @Test
+    void reliableMaterialScoreRejectsVectorScoreBelowThreshold() {
+        Document chunk = ragChunk(Map.of("vectorScore", 0.25, "keywordScore", 1.0));
+
+        assertThat(RagServiceImpl.hasReliableMaterialScore(List.of(chunk))).isFalse();
+    }
+
+    @Test
+    void reliableMaterialScoreFallsBackToStrongKeywordScoreWithoutVectorSignal() {
+        Document chunk = ragChunk(Map.of("vectorScore", 0.0, "keywordScore", 1.0));
+
+        assertThat(RagServiceImpl.hasReliableMaterialScore(List.of(chunk))).isTrue();
+    }
+
+    @Test
+    void reliableMaterialScoreRejectsWeakKeywordScoreWithoutVectorSignal() {
+        Document chunk = ragChunk(Map.of("vectorScore", 0.0, "keywordScore", 0.1));
+
+        assertThat(RagServiceImpl.hasReliableMaterialScore(List.of(chunk))).isFalse();
+    }
+
+    @Test
+    void reliableMaterialScoreAcceptsVectorScoreAtThreshold() {
+        Document chunk = ragChunk(Map.of("vectorScore", 0.4, "keywordScore", 0.0));
+
+        assertThat(RagServiceImpl.hasReliableMaterialScore(List.of(chunk))).isTrue();
+    }
+
+    @Test
+    void filterRelevantChunksDropsLowScoreOffTopicChunk() {
+        // 模拟「帮我总结第6章内容」：第6章切片向量分高，第3章切片被字符 n-gram 误召回、分低
+        Document chapter6 = ragChunk(Map.of("source", "第6章 缺陷报告与测试评估.pdf",
+                "vectorScore", 0.55, "keywordScore", 0.4));
+        Document chapter3 = ragChunk(Map.of("source", "第3章 黑盒测试.pdf",
+                "vectorScore", 0.22, "keywordScore", 0.2));
+
+        List<Document> relevant = RagServiceImpl.filterRelevantChunks(List.of(chapter6, chapter3));
+
+        assertThat(relevant).extracting(d -> d.getMetadata().get("source"))
+                .containsExactly("第6章 缺陷报告与测试评估.pdf");
+    }
+
+    @Test
+    void filterRelevantChunksKeepsTopChunkWhenAllBelowThreshold() {
+        Document best = ragChunk(Map.of("source", "a.pdf", "vectorScore", 0.39, "keywordScore", 0.1));
+        Document worse = ragChunk(Map.of("source", "b.pdf", "vectorScore", 0.30, "keywordScore", 0.1));
+
+        List<Document> relevant = RagServiceImpl.filterRelevantChunks(List.of(best, worse));
+
+        assertThat(relevant).extracting(d -> d.getMetadata().get("source")).containsExactly("a.pdf");
+    }
+
+    @Test
+    void filterRelevantChunksUsesKeywordScoreWithoutVectorSignal() {
+        Document strong = ragChunk(Map.of("source", "a.pdf", "vectorScore", 0.0, "keywordScore", 1.0));
+        Document weak = ragChunk(Map.of("source", "b.pdf", "vectorScore", 0.0, "keywordScore", 0.05));
+
+        List<Document> relevant = RagServiceImpl.filterRelevantChunks(List.of(strong, weak));
+
+        assertThat(relevant).extracting(d -> d.getMetadata().get("source")).containsExactly("a.pdf");
     }
 
     @Test
@@ -88,8 +159,9 @@ class RagServiceImplTest {
         ));
         when(subjectRepository.existsByIdAndUserId(4L, 7L)).thenReturn(true);
         when(documentIngestionService.retrieve(7L, 4L, "刚才那页讲的是轮转调度算法\n轮转调度按时间片公平分配 CPU\n它有什么优缺点？", 5))
-                .thenReturn(List.of(new org.springframework.ai.document.Document("轮转调度优点是公平，缺点是时间片过小会增加切换开销。",
-                        java.util.Map.of("source", "os.pdf", "materialId", "11"))));
+                .thenReturn(List.of(new Document("轮转调度优点是公平，缺点是时间片过小会增加切换开销。",
+                        Map.of("source", "os.pdf", "materialId", "11",
+                                "score", 0.6, "keywordScore", 0.3, "vectorScore", 0.6))));
         var requestSpec = chatClient.prompt();
         when(chatClient.prompt().system(anyString()).user(contains("刚才那页讲的是轮转调度算法")).call().content())
                 .thenReturn("轮转调度较公平，但时间片过小会增加上下文切换开销。");
@@ -137,7 +209,8 @@ class RagServiceImplTest {
         request.setQuestion("请总结并发控制和 CPU 分配的核心知识点");
         org.springframework.ai.document.Document weakMatch = new org.springframework.ai.document.Document(
                 "这段资料只零散提到了操作系统。",
-                java.util.Map.of("source", "os.pdf", "materialId", "11", "score", 0.05)
+                Map.of("source", "os.pdf", "materialId", "11",
+                        "score", 0.45, "keywordScore", 1.0, "vectorScore", 0.25)
         );
         when(subjectRepository.existsByIdAndUserId(4L, 7L)).thenReturn(true);
         when(documentIngestionService.retrieve(7L, 4L, "请总结并发控制和 CPU 分配的核心知识点", 5))
@@ -184,5 +257,9 @@ class RagServiceImplTest {
     private void loginAs(Long userId) {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(userId, null, Collections.emptyList()));
+    }
+
+    private Document ragChunk(Map<String, Object> metadata) {
+        return new Document("资料切片", metadata);
     }
 }

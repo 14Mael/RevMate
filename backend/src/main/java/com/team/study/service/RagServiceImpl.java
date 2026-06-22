@@ -41,7 +41,8 @@ public class RagServiceImpl implements RagService {
     private static final int TOP_K = 5;
     private static final int MIN_HITS = 1;
     private static final int MATERIAL_CONTEXT_CHUNKS = 8;
-    private static final double MIN_MATERIAL_SCORE = 0.12;
+    private static final double MIN_VECTOR_SCORE = 0.40;
+    private static final double MIN_KEYWORD_SCORE = 0.12;
 
     /** 统一的输出格式约束，避免模型产出坏掉的表格 / LaTeX 公式导致前端渲染异常 */
     private static final String FORMAT_GUIDE = """
@@ -88,7 +89,7 @@ public class RagServiceImpl implements RagService {
         log.info("未指定资料，走关键词检索: subjectId={}, 命中切片数={}", subjectId, chunks == null ? 0 : chunks.size());
 
         if (chunks != null && chunks.size() >= MIN_HITS && hasReliableMaterialScore(chunks)) {
-            return answerFromMaterials(userPrompt, chunks, sources);
+            return answerFromMaterials(userPrompt, filterRelevantChunks(chunks), sources);
         } else {
             log.warn("关键词检索未命中，回落到无资料应答: subjectId={}", subjectId);
             return answerNoData(userPrompt);
@@ -125,7 +126,7 @@ public class RagServiceImpl implements RagService {
         List<Document> chunks = documentIngestionService.retrieve(userId, subjectId, retrievalQuery, TOP_K);
         log.info("未指定资料，流式关键词检索: subjectId={}, 命中切片数={}", subjectId, chunks == null ? 0 : chunks.size());
         if (chunks != null && chunks.size() >= MIN_HITS && hasReliableMaterialScore(chunks)) {
-            return answerFromMaterialsStream(userPrompt, chunks, sources);
+            return answerFromMaterialsStream(userPrompt, filterRelevantChunks(chunks), sources);
         }
         log.warn("关键词检索未命中，流式回落到无资料应答: subjectId={}", subjectId);
         return answerNoDataStream(userPrompt);
@@ -308,17 +309,58 @@ public class RagServiceImpl implements RagService {
         };
     }
 
-    private boolean hasReliableMaterialScore(List<Document> chunks) {
-        double bestScore = chunks.stream()
-                .mapToDouble(chunk -> {
-                    Object score = chunk.getMetadata().get("score");
-                    if (score instanceof Number number) {
-                        return number.doubleValue();
-                    }
-                    return 1.0;
-                })
+    static boolean hasReliableMaterialScore(List<Document> chunks) {
+        double bestVectorScore = chunks.stream()
+                .mapToDouble(chunk -> metadataScore(chunk, "vectorScore"))
                 .max()
                 .orElse(0.0);
-        return bestScore >= MIN_MATERIAL_SCORE;
+        if (bestVectorScore > 0.0) {
+            return bestVectorScore >= MIN_VECTOR_SCORE;
+        }
+
+        double bestKeywordScore = chunks.stream()
+                .mapToDouble(chunk -> metadataScore(chunk, "keywordScore"))
+                .max()
+                .orElse(0.0);
+        return bestKeywordScore >= MIN_KEYWORD_SCORE;
+    }
+
+    /**
+     * 过了「是否命中资料」的总门之后，再按同一条相关性线逐切片过滤：
+     * 只有自身分数达标的切片才有资格进入上下文、才有资格作为来源展示，
+     * 避免 TopK 里混入的低分异主题切片（如问「第6章」却带出「第3章」）污染回答与来源。
+     * 判定口径与 {@link #hasReliableMaterialScore} 保持一致：有向量信号看 vectorScore，否则看 keywordScore。
+     */
+    static List<Document> filterRelevantChunks(List<Document> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return List.of();
+        }
+        boolean hasVectorSignal = chunks.stream()
+                .anyMatch(chunk -> metadataScore(chunk, "vectorScore") > 0.0);
+        String scoreKey = hasVectorSignal ? "vectorScore" : "keywordScore";
+        double threshold = hasVectorSignal ? MIN_VECTOR_SCORE : MIN_KEYWORD_SCORE;
+
+        List<Document> relevant = chunks.stream()
+                .filter(chunk -> metadataScore(chunk, scoreKey) >= threshold)
+                .toList();
+
+        // 兜底：理论上既然过了总门，至少有一个切片达标；万一全被滤掉，保留分最高的那个
+        // （chunks 已在检索阶段按融合分降序排列，首个即最高分）。
+        return relevant.isEmpty() ? List.of(chunks.getFirst()) : relevant;
+    }
+
+    private static double metadataScore(Document chunk, String key) {
+        Object score = chunk.getMetadata().get(key);
+        if (score instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (score instanceof String text) {
+            try {
+                return Double.parseDouble(text);
+            } catch (NumberFormatException ignored) {
+                return 0.0;
+            }
+        }
+        return 0.0;
     }
 }
