@@ -5,8 +5,6 @@ import com.team.study.dto.response.ChatResponse;
 import com.team.study.dto.response.SourceItem;
 import com.team.study.security.SecurityUtil;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
@@ -26,13 +24,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class RagServiceImpl implements RagService {
 
-    private static final Logger log = LoggerFactory.getLogger(RagServiceImpl.class);
-
     private final ChatClient chatClient;
     private final DocumentIngestionService documentIngestionService;
 
     private static final int TOP_K = 5;
-    private static final int MIN_HITS = 1;
 
     @Override
     public ChatResponse chat(ChatRequest request) {
@@ -47,7 +42,7 @@ public class RagServiceImpl implements RagService {
         // 1. 检索用户自己的资料
         List<Document> chunks = documentIngestionService.retrieve(userId, question, TOP_K);
 
-        if (chunks != null && chunks.size() >= MIN_HITS) {
+        if (chunks != null && !chunks.isEmpty()) {
             return answerFromMaterials(question, chunks, sources);
         } else {
             return answerNoData(question);
@@ -56,8 +51,7 @@ public class RagServiceImpl implements RagService {
 
     private ChatResponse answerFromMaterials(String question, List<Document> chunks, List<SourceItem> sources) {
         StringBuilder contextBuilder = new StringBuilder();
-        for (int i = 0; i < chunks.size(); i++) {
-            Document chunk = chunks.get(i);
+        for (Document chunk : chunks) {
             String sourceName = (String) chunk.getMetadata().getOrDefault("source", "未知资料");
             contextBuilder.append("【").append(sourceName).append("】\n")
                     .append(chunk.getText())
@@ -66,7 +60,7 @@ public class RagServiceImpl implements RagService {
             sources.add(SourceItem.builder()
                     .type("material")
                     .title((String) chunk.getMetadata().getOrDefault("source", "未知资料"))
-                    .snippet(truncate(chunk.getText(), 150))
+                    .snippet(truncate(chunk.getText()))
                     .materialId(chunk.getMetadata().get("materialId") != null
                             ? Long.valueOf(chunk.getMetadata().get("materialId").toString()) : null)
                     .build());
@@ -98,9 +92,9 @@ public class RagServiceImpl implements RagService {
         return new ChatResponse(answer != null ? answer : "", List.of());
     }
 
-    private String truncate(String text, int maxLen) {
+    private String truncate(String text) {
         if (text == null) return "";
-        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
+        return text.length() <= 150 ? text : text.substring(0, 150) + "...";
     }
 
     @Override
