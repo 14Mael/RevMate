@@ -43,6 +43,16 @@ public class RagServiceImpl implements RagService {
     private static final int MATERIAL_CONTEXT_CHUNKS = 8;
     private static final double MIN_MATERIAL_SCORE = 0.12;
 
+    /** 统一的输出格式约束，避免模型产出坏掉的表格 / LaTeX 公式导致前端渲染异常 */
+    private static final String FORMAT_GUIDE = """
+
+            输出格式要求：
+            - 使用标准 Markdown。若用表格，必须是合法的 GFM 表格：分隔行（| --- | --- |）的列数与表头完全一致，每行首尾都带 | 。
+            - 不要使用 LaTeX 或 $...$ 数学公式，数学符号请用普通文字或行内代码表示（例如 `Need <= Work`、`P_i`）。
+            - 列表各项之间不要插入空行，保持紧凑。
+            - 不要在回答中罗列「信息来源」「参考资料」或文件名，来源由系统在下方单独展示。
+            """;
+
     @Override
     public ChatResponse chat(ChatRequest request) {
         Long userId = validateUserAndSubject(request);
@@ -154,11 +164,10 @@ public class RagServiceImpl implements RagService {
                 .system("""
                         你是一个复习资料智能助手。请基于以下参考资料回答用户的问题。
                         如果参考资料中有相关内容，请优先使用资料中的信息。
-                        在回答末尾注明信息来源的文件名。
 
                         参考资料：
                         %s
-                        """.formatted(contextBuilder.toString()))
+                        """.formatted(contextBuilder.toString()) + FORMAT_GUIDE)
                 .user(question)
                 .call()
                 .content();
@@ -174,7 +183,7 @@ public class RagServiceImpl implements RagService {
 
                         参考资料：
                         %s
-                        """.formatted(context))
+                        """.formatted(context) + FORMAT_GUIDE)
                 .user(question)
                 .call()
                 .content();
@@ -184,7 +193,7 @@ public class RagServiceImpl implements RagService {
 
     private ChatResponse answerNoData(String question) {
         String answer = chatClient.prompt()
-                .system("你是一个智能助手。没有找到可靠的资料上下文，请明确说明这不是基于上传资料的回答，再根据你的通用知识回答。")
+                .system("你是一个智能助手。没有找到可靠的资料上下文，请明确说明这不是基于上传资料的回答，再根据你的通用知识回答。" + FORMAT_GUIDE)
                 .user(question)
                 .call()
                 .content();
@@ -234,11 +243,10 @@ public class RagServiceImpl implements RagService {
                 .system("""
                         你是一个复习资料智能助手。请基于以下参考资料回答用户的问题。
                         如果参考资料中有相关内容，请优先使用资料中的信息。
-                        在回答末尾注明信息来源的文件名。
 
                         参考资料：
                         %s
-                        """.formatted(context))
+                        """.formatted(context) + FORMAT_GUIDE)
                 .user(question)
                 .stream()
                 .content()
@@ -248,7 +256,7 @@ public class RagServiceImpl implements RagService {
 
     private Flux<ChatStreamEvent> answerNoDataStream(String question) {
         return chatClient.prompt()
-                .system("你是一个智能助手。用户的问题目前没有相关的复习资料，请根据你的知识回答。")
+                .system("你是一个智能助手。用户的问题目前没有相关的复习资料，请根据你的知识回答。" + FORMAT_GUIDE)
                 .user(question)
                 .stream()
                 .content()
