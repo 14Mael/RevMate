@@ -96,13 +96,14 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
                     }
                 }
 
-                // 综合评分（阈值 0.3）
+                // 综合评分
                 double score = 0;
                 if (exactMatch) score += 1.0;
                 if (sourceMatch) score += 0.8;
                 score += overlapRate * 0.5;
 
-                if (score > 0.3) {
+                // 只要有匹配就算（阈值降到 0）
+                if (score > 0) {
                     Document doc = new Document(chunk.text, Map.of(
                             "userId", userId.toString(),
                             "materialId", entry.getKey().toString(),
