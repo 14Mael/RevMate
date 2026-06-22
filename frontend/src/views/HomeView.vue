@@ -16,7 +16,7 @@ import { chatStreamWithFallback, getHistoryList, saveHistory, generateHistoryId 
 import { listSubjects } from '@/api/subject'
 import { renderMarkdown } from '@/utils/markdown'
 import ChatHistoryPanel from '@/components/ChatHistoryPanel.vue'
-import { PhPaperPlaneTilt, PhSparkle, PhBookOpen, PhQuotes, PhCaretDown, PhClockCounterClockwise } from '@/components/icons'
+import { PhPaperPlaneTilt, PhSparkle, PhBookOpen, PhQuotes, PhCaretDown, PhClockCounterClockwise, PhPlus } from '@/components/icons'
 import type { ChatHistoryItem, Source, Subject } from '@/api/types'
 
 const route = useRoute()
@@ -255,6 +255,9 @@ const sourceIcon = {
         </div>
       </div>
       <div class="header-right">
+        <button class="history-btn" @click="startNewSession" title="新建对话">
+          <PhPlus :size="16" />
+        </button>
         <button class="history-btn" @click="historyPanelVisible = true" title="历史记录">
           <PhClockCounterClockwise :size="16" />
         </button>
@@ -791,6 +794,17 @@ const sourceIcon = {
 
 .markdown-body :deep(li) {
   margin-bottom: var(--space-xs);
+}
+
+/* 松散列表项内的 <p> 不额外撑高，避免间距过大 */
+.markdown-body :deep(li > p) {
+  margin: 0;
+}
+
+/* 嵌套子列表贴紧父项 */
+.markdown-body :deep(li > ul),
+.markdown-body :deep(li > ol) {
+  margin: var(--space-xs) 0 0;
 }
 
 /* ==================== Sources ==================== */
