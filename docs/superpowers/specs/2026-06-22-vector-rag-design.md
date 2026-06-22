@@ -1,198 +1,198 @@
-# Vector RAG Design
+# 向量 RAG 设计
 
-## Goal
+## 目标
 
-RevMate should evolve from keyword-only document QA into a vector-backed RAG system that can answer from uploaded study materials reliably, even when users ask in different wording or refer to prior turns with phrases like "this PPT" or "the one above".
+RevMate 应该从只依赖关键词的资料问答，逐步升级为基于向量检索的 RAG 系统。升级后，即使用户换一种说法提问，或者用“这个 PPT”“上面那个”这类指代表达继续追问，系统也能稳定地从已上传的复习资料中找到相关内容并回答。
 
-The target design keeps the current upload, preview, material list, and chat experience intact while improving the backend retrieval layer in phases. It must work without Knowhere or another external document parsing service.
+这个设计保留当前的上传、预览、资料列表和聊天体验，只分阶段增强后端检索层。第一版不依赖 Knowhere 或其他外部文档解析服务。
 
-## Current Problems
+## 当前问题
 
-1. Chat requests do not include conversation history, so follow-up questions lose context.
-2. The frontend does not consistently pass `materialId`, even though the backend already supports scoped material QA.
-3. Retrieval is keyword-only and weak for Chinese long-form questions.
-4. Summary questions can miss conclusions because selected-material context currently takes only the first few chunks.
-5. When no material is found, the backend falls back to general model knowledge without clearly marking the answer as non-material.
+1. 聊天请求没有携带历史消息，导致追问时上下文丢失。
+2. 虽然后端已经支持按 `materialId` 限定资料问答，但前端没有稳定传递 `materialId`。
+3. 当前检索只靠关键词，对中文长句和换一种说法的提问效果较弱。
+4. 总结类问题容易漏掉结论，因为指定资料上下文目前只取前几个切片。
+5. 当资料没有命中时，后端会直接回落到模型通用知识回答，但没有明确标记这不是资料回答。
 
-## Recommended Approach
+## 推荐方案
 
-Build the vector RAG system incrementally:
+按阶段建设向量 RAG 系统：
 
-1. First add the chat protocol fields needed by every later phase: `history`, `materialId`, and `answerMode`.
-2. Introduce a retrieval abstraction that returns ranked chunks with scores and source metadata.
-3. Add embeddings for material chunks and query text.
-4. Store vectors in MySQL initially and compute cosine similarity in Java.
-5. Combine vector retrieval with existing keyword retrieval for hybrid ranking.
-6. Add a reindex path for old materials that do not have embeddings.
+1. 先补齐后续阶段都需要的聊天协议字段：`history`、`materialId` 和 `answerMode`。
+2. 引入检索抽象，统一返回带分数和来源元数据的排序切片。
+3. 为资料切片和用户问题生成 embedding。
+4. 第一版先把向量存到 MySQL，并在 Java 中计算余弦相似度。
+5. 将向量检索与现有关键词检索合并，形成混合排序。
+6. 为旧资料增加重新索引入口，让没有 embedding 的历史切片可以补齐向量。
 
-This avoids a large database or infrastructure jump while still reaching the core behavior of scheme C.
+这样可以避免一次性引入大型数据库或额外基础设施，同时仍然实现方案 C 的核心效果。
 
-## Chat Protocol
+## 聊天协议
 
-`ChatRequest` should include:
+`ChatRequest` 应包含：
 
-- `subjectId`: required, keeps retrieval inside one course.
-- `materialId`: optional, locks retrieval to one selected material.
-- `question`: required.
-- `history`: optional recent turns, capped on the frontend and backend.
+- `subjectId`：必填，用于把检索范围限制在当前课程内。
+- `materialId`：可选，用于把检索范围锁定在当前选中的资料内。
+- `question`：必填，用户本轮问题。
+- `history`：可选，最近几轮对话，由前端和后端共同限制长度。
 
-`ChatResponse` should include:
+`ChatResponse` 应包含：
 
-- `answer`: model output.
-- `sources`: retrieved material chunks.
-- `answerMode`: `material`, `general`, or later `web`.
+- `answer`：模型回答。
+- `sources`：本次检索命中的资料切片来源。
+- `answerMode`：回答模式，取值为 `material`、`general`，未来可扩展为 `web`。
 
-If retrieval confidence is too low, the backend should return `answerMode=general` and the prompt should clearly state that no reliable material context was found.
+如果检索置信度过低，后端应返回 `answerMode=general`，并在提示词中明确说明没有找到可靠的资料上下文。
 
-## Data Model
+## 数据模型
 
-Keep `material_chunks` as the main retrieval unit and extend it with vector metadata:
+继续以 `material_chunks` 作为主要检索单元，并扩展向量相关字段：
 
-- `embedding`: serialized float array, stored as JSON or TEXT for the first implementation.
-- `embedding_model`: model name used to generate the vector.
-- `embedding_status`: `PENDING`, `READY`, or `FAILED`.
-- Optional later fields: `page`, `section_title`, `token_count`.
+- `embedding`：序列化后的浮点数组，第一版可用 JSON 或 TEXT 存储。
+- `embedding_model`：生成该向量所使用的模型名称。
+- `embedding_status`：向量生成状态，取值为 `PENDING`、`READY` 或 `FAILED`。
+- 后续可选字段：`page`、`section_title`、`token_count`。
 
-For the first implementation, MySQL storage plus Java cosine similarity is acceptable because the expected material volume is small. A future migration can replace this with a real vector index without changing the chat protocol.
+第一版使用 MySQL 存储向量，并在 Java 中计算余弦相似度是可以接受的，因为当前预期资料规模较小。未来如果资料量或性能压力变大，可以在不改变聊天协议的前提下迁移到真正的向量索引。
 
-## Embedding Service
+## Embedding 服务
 
-Add an `EmbeddingService` boundary that hides model details from ingestion and retrieval.
+新增 `EmbeddingService` 边界，用来屏蔽具体模型和 API 细节，让入库流程和检索流程不直接依赖模型实现。
 
-Responsibilities:
+职责包括：
 
-- Generate embeddings for chunks during ingestion.
-- Generate embeddings for user queries during chat.
-- Batch chunk embedding where possible.
-- Report failures without breaking upload processing.
+- 在资料入库时为切片生成 embedding。
+- 在聊天时为用户问题生成 query embedding。
+- 在条件允许时批量生成切片 embedding。
+- embedding 失败时报告错误，但不让上传流程整体失败。
 
-Configuration should use the existing OpenAI-compatible setup where possible:
+配置应尽量复用现有 OpenAI-compatible 设置：
 
 - `OPENAI_BASE_URL`
 - `OPENAI_API_KEY`
 - `EMBEDDING_MODEL`
 - `EMBEDDING_ENABLED`
 
-If embeddings fail, chunks should still be saved with `embedding_status=FAILED`, and retrieval can fall back to keyword search.
+如果 embedding 生成失败，切片仍然要保存，状态标记为 `embedding_status=FAILED`，检索时回退到关键词检索。
 
-## Retrieval Flow
+## 检索流程
 
-For a normal chat request:
+普通聊天请求流程：
 
-1. Resolve user and validate `subjectId`.
-2. If `materialId` is provided, restrict candidates to that material.
-3. Build a query string from the current question plus a compact summary of recent history.
-4. Run vector retrieval if embeddings are enabled and available.
-5. Run keyword retrieval as a fallback and supplement.
-6. Merge scores into a hybrid score.
-7. Keep top chunks and pass them to the model.
+1. 解析当前用户并校验 `subjectId`。
+2. 如果请求包含 `materialId`，候选切片只来自该资料。
+3. 将当前问题和最近历史消息压缩成检索查询文本。
+4. 如果 embedding 已启用且可用，执行向量检索。
+5. 同时执行关键词检索，作为兜底和补充。
+6. 合并向量分数与关键词分数，得到混合分数。
+7. 保留分数最高的切片，并把它们作为资料上下文传给模型。
 
-Suggested first scoring formula:
+第一版建议评分公式：
 
 ```text
 finalScore = vectorScore * 0.75 + keywordScore * 0.25
 ```
 
-For selected-material summary questions, retrieval should also include representative chunks:
+对于指定资料的总结类问题，检索还应额外纳入代表性切片：
 
-- first chunks,
-- last chunks,
-- chunks containing words such as "总结", "结论", "展望", "Conclusion", "Summary".
+- 开头切片；
+- 结尾切片；
+- 包含“总结”“结论”“展望”“Conclusion”“Summary”等词的切片。
 
-This keeps PPT conclusion questions useful even before perfect vector ranking.
+这样即使向量排序还不完美，PPT 结论类问题也能更稳定地拿到有用上下文。
 
-## Prompting
+## 提示词
 
-Material answers should use a strict source-grounded prompt:
+资料回答应使用严格基于来源的提示词：
 
-- answer based on provided material context first,
-- cite source snippets or chunk numbers,
-- say when the material does not contain enough information,
-- avoid pretending general knowledge came from the uploaded material.
+- 优先根据提供的资料上下文回答；
+- 引用来源切片或切片编号；
+- 当资料中信息不足时明确说明；
+- 避免把通用知识伪装成上传资料中的内容。
 
-History should be included as conversation context, not as source material. Retrieved chunks remain the only citable material sources.
+历史消息只作为对话上下文使用，不作为可引用的资料来源。只有检索到的资料切片可以作为 `sources` 展示。
 
-## Frontend Changes
+## 前端改动
 
-The chat page should:
+聊天页应支持：
 
-- read `subjectId` and `materialId` from route query when coming from material pages,
-- pass the selected `materialId` on every chat request until cleared,
-- send recent chat turns as `history`,
-- display whether the answer came from material or general knowledge,
-- keep source cards for material chunks.
+- 从资料页跳转过来时读取路由中的 `subjectId` 和 `materialId`；
+- 在用户清除选择前，每次聊天请求都传递当前选中的 `materialId`；
+- 发送最近几轮对话作为 `history`；
+- 展示回答来自资料还是通用知识；
+- 保留资料切片来源卡片。
 
-The material detail page should provide an "Ask about this material" entry that navigates to chat with both IDs.
+资料详情页应提供“基于此资料提问”的入口，并跳转到聊天页，同时携带 `subjectId` 和 `materialId`。
 
-## Reindexing
+## 重新索引
 
-Existing chunks need embeddings after this feature lands.
+功能上线后，已有切片需要补齐 embedding。
 
-Add one of these paths:
+可先增加以下任一入口：
 
-- a backend endpoint: `POST /api/materials/{id}/reindex`,
-- or an admin/service method that reprocesses chunks with missing embeddings.
+- 后端接口：`POST /api/materials/{id}/reindex`；
+- 或者内部管理/service 方法，重新处理缺少 embedding 的切片。
 
-The first implementation can be manual. Automatic background reindexing can come later.
+第一版可以手动触发。自动后台补索引可以后续再做。
 
-## Error Handling
+## 错误处理
 
-Upload should not fail only because embedding generation failed. The system should:
+上传流程不应因为 embedding 生成失败而整体失败。系统应做到：
 
-- save chunks first,
-- attempt embeddings,
-- mark failed embeddings,
-- use keyword retrieval when vectors are unavailable.
+- 先保存资料切片；
+- 再尝试生成 embedding；
+- 对失败的 embedding 做状态标记；
+- 向量不可用时回退到关键词检索。
 
-Chat should still answer with available material context when only keyword retrieval works.
+当只有关键词检索可用时，聊天仍应尽量基于可用资料上下文回答。
 
-## Testing Strategy
+## 测试策略
 
-Add focused tests for:
+需要补充聚焦测试：
 
-- chat request history serialization,
-- selected `materialId` routing,
-- `answerMode` behavior for material and general answers,
-- embedding serialization/deserialization,
-- cosine similarity ranking,
-- hybrid merge ordering,
-- fallback to keyword retrieval when embeddings are disabled or failed,
-- summary retrieval including first, last, and conclusion-like chunks.
+- 聊天请求历史消息的序列化；
+- 指定 `materialId` 的路由和请求传递；
+- `answerMode` 在资料回答和通用回答下的行为；
+- embedding 的序列化与反序列化；
+- 余弦相似度排序；
+- 混合检索合并排序；
+- embedding 禁用或失败时回退到关键词检索；
+- 总结类检索包含开头、结尾和结论相关切片。
 
-## Phased Delivery
+## 分阶段交付
 
-Phase 1: Protocol and UI context
+Phase 1：协议与前端上下文
 
-- Add `history` and `answerMode`.
-- Pass `materialId` from material pages to chat.
-- Keep current keyword retrieval.
+- 添加 `history` 和 `answerMode`。
+- 从资料页向聊天页传递 `materialId`。
+- 暂时保留当前关键词检索。
 
-Phase 2: Retrieval abstraction
+Phase 2：检索抽象
 
-- Introduce a ranked chunk result object.
-- Separate keyword retrieval from chat orchestration.
-- Add selected-material summary retrieval.
+- 引入排序切片结果对象。
+- 将关键词检索从聊天编排中拆出来。
+- 增加指定资料的总结类检索策略。
 
-Phase 3: Embeddings in MySQL
+Phase 3：MySQL 中的 embedding
 
-- Add embedding fields to `material_chunks`.
-- Generate embeddings during ingestion.
-- Add query embedding and cosine retrieval.
+- 为 `material_chunks` 增加 embedding 字段。
+- 入库时生成 chunk embedding。
+- 聊天时生成 query embedding，并执行余弦相似度检索。
 
-Phase 4: Hybrid retrieval
+Phase 4：混合检索
 
-- Merge vector and keyword scores.
-- Add confidence thresholding.
-- Improve source display.
+- 合并向量分数和关键词分数。
+- 增加置信度阈值。
+- 优化来源展示。
 
-Phase 5: Reindexing and hardening
+Phase 5：重新索引与稳定性增强
 
-- Reindex old materials.
-- Add operational logging.
-- Prepare a future vector database migration if material volume grows.
+- 为旧资料补齐 embedding。
+- 增加关键运行日志。
+- 如果资料规模增长，再准备迁移到向量数据库。
 
-## Open Decisions
+## 已确定的取舍
 
-The first implementation should use MySQL plus Java cosine similarity. A dedicated vector database is intentionally deferred until there is enough material volume or latency pressure to justify it.
+第一版使用 MySQL 加 Java 余弦相似度。专用向量数据库暂缓，等资料量或延迟压力足够明显时再引入。
 
-The first implementation should keep document parsing local and unchanged. Knowhere or similar document intelligence services can be added later as an ingestion enhancement, independent of the vector retrieval design.
+第一版保持本地文档解析流程不变。Knowhere 或类似文档智能服务以后可以作为入库增强接入，但它与本向量检索设计相互独立。
