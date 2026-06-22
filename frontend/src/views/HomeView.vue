@@ -98,6 +98,8 @@ async function sendMessage() {
     isStreaming: true
   }
   messages.value.push(aiMsg)
+  // 取回数组内的响应式代理，直接改原始 aiMsg 不会触发逐字重渲染
+  const streamingMsg = messages.value[messages.value.length - 1]
   isGenerating.value = true
   scrollToBottom()
 
@@ -109,18 +111,18 @@ async function sendMessage() {
       history
     })
     for await (const chunk of gen) {
-      aiMsg.content += chunk.text
+      streamingMsg.content += chunk.text
       if (chunk.done) {
-        aiMsg.sources = chunk.sources
-        aiMsg.answerMode = chunk.answerMode
-        aiMsg.isStreaming = false
+        streamingMsg.sources = chunk.sources
+        streamingMsg.answerMode = chunk.answerMode
+        streamingMsg.isStreaming = false
         isGenerating.value = false
       }
       scrollToBottom()
     }
   } catch (e) {
-    aiMsg.content = '抱歉，请求失败，请稍后重试。'
-    aiMsg.isStreaming = false
+    streamingMsg.content = '抱歉，请求失败，请稍后重试。'
+    streamingMsg.isStreaming = false
     isGenerating.value = false
     ElMessage.error('问答请求失败')
   }

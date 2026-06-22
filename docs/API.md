@@ -190,10 +190,14 @@ Authorization: Bearer {token}
 **响应格式：** `text/event-stream`
 
 ```
-data:RAG是
-data:检索增强
-data:生成技术
-data:[DONE]
+event:delta
+data:{"type":"delta","text":"RAG是","sources":[],"answerMode":null}
+
+event:delta
+data:{"type":"delta","text":"检索增强生成技术","sources":[],"answerMode":null}
+
+event:done
+data:{"type":"done","text":null,"sources":[{"type":"material","title":"os.pdf","snippet":"RAG（检索增强生成）是一种...","materialId":12}],"answerMode":"material"}
 ```
 
 **前端示例（Vue3）：**
@@ -205,10 +209,20 @@ const resp = await fetch('/api/chat/stream', {
 });
 const reader = resp.body.getReader();
 const decoder = new TextDecoder();
+let buffer = '';
 while (true) {
   const { done, value } = await reader.read();
   if (done) break;
-  text += decoder.decode(value);
+  buffer += decoder.decode(value, { stream: true });
+  const events = buffer.split('\n\n');
+  buffer = events.pop() || '';
+  for (const block of events) {
+    const data = block.split('\n').find(line => line.startsWith('data:'))?.slice(5);
+    if (!data) continue;
+    const event = JSON.parse(data);
+    if (event.type === 'delta') text += event.text;
+    if (event.type === 'done') sources = event.sources;
+  }
 }
 ```
 

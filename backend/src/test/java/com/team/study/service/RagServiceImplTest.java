@@ -3,6 +3,7 @@ package com.team.study.service;
 import com.team.study.dto.request.ChatRequest;
 import com.team.study.dto.request.ChatHistoryMessage;
 import com.team.study.dto.response.ChatResponse;
+import com.team.study.dto.response.ChatStreamEvent;
 import com.team.study.repository.MaterialRepository;
 import com.team.study.repository.SubjectRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -150,6 +151,34 @@ class RagServiceImplTest {
 
         assertThat(response.getAnswerMode()).isEqualTo("general");
         assertThat(response.getSources()).isEmpty();
+    }
+
+    @Test
+    void chatStreamEmitsDeltaChunksAndDoneEventWithSources() {
+        loginAs(7L);
+        RagServiceImpl service = new RagServiceImpl(
+                chatClient, documentIngestionService, subjectRepository, materialRepository);
+        ChatRequest request = new ChatRequest();
+        request.setSubjectId(4L);
+        request.setMaterialId(16L);
+        request.setQuestion("这份资料讲了什么？");
+        when(subjectRepository.existsByIdAndUserId(4L, 7L)).thenReturn(true);
+        when(materialRepository.existsByIdAndUserIdAndSubjectId(16L, 7L, 4L)).thenReturn(true);
+        when(documentIngestionService.getMaterialContext(7L, 16L, "这份资料讲了什么？", 8))
+                .thenReturn("资料介绍了操作系统调度。");
+        when(chatClient.prompt().system(anyString()).user(anyString()).stream().content())
+                .thenReturn(reactor.core.publisher.Flux.just("资料", "讲了调度"));
+
+        List<ChatStreamEvent> events = service.chatStream(request).collectList().block();
+
+        assertThat(events).extracting(ChatStreamEvent::getType)
+                .containsExactly("delta", "delta", "done");
+        assertThat(events).extracting(ChatStreamEvent::getText)
+                .containsExactly("资料", "讲了调度", null);
+        ChatStreamEvent done = events.getLast();
+        assertThat(done.getAnswerMode()).isEqualTo("material");
+        assertThat(done.getSources()).hasSize(1);
+        assertThat(done.getSources().getFirst().getMaterialId()).isEqualTo(16L);
     }
 
     private void loginAs(Long userId) {

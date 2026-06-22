@@ -92,6 +92,13 @@ export interface ChatResponse {
   answerMode: AnswerMode
 }
 
+export interface ChatStreamEvent {
+  type: 'delta' | 'done'
+  text?: string | null
+  sources?: Source[]
+  answerMode?: AnswerMode
+}
+
 /* ========== 出题 ========== */
 
 export type QuizType = 'single' | 'fill' | 'qa'
