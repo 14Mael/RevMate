@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,24 +42,16 @@ public class RagServiceImpl implements RagService {
 
     @Override
     public ChatResponse chat(ChatRequest request) {
-        Long userId = SecurityUtil.getCurrentUserId();
-        if (userId == null) {
-            throw new IllegalArgumentException("未登录");
-        }
+        Long userId = validateUserAndSubject(request);
 
         String question = request.getQuestion();
         Long subjectId = request.getSubjectId();
-        if (subjectId == null || !subjectRepository.existsByIdAndUserId(subjectId, userId)) {
-            throw new IllegalArgumentException("学科不存在或无权访问");
-        }
         List<SourceItem> sources = new ArrayList<>();
 
         Long materialId = request.getMaterialId();
         log.info("RAG 请求: userId={}, subjectId={}, materialId={}", userId, subjectId, materialId);
         if (materialId != null) {
-            if (!materialRepository.existsByIdAndUserIdAndSubjectId(materialId, userId, subjectId)) {
-                throw new IllegalArgumentException("资料不存在或不属于该学科");
-            }
+            validateMaterial(userId, subjectId, materialId);
             String context = documentIngestionService.getMaterialContext(userId, materialId, MATERIAL_CONTEXT_CHUNKS);
             int contextLength = context == null ? 0 : context.length();
             log.info("指定资料上下文: materialId={}, 上下文长度={}", materialId, contextLength);
@@ -87,11 +80,59 @@ public class RagServiceImpl implements RagService {
         }
     }
 
+    @Override
+    public Flux<String> chatStream(ChatRequest request) {
+        Long userId = validateUserAndSubject(request);
+
+        String question = request.getQuestion();
+        Long subjectId = request.getSubjectId();
+        Long materialId = request.getMaterialId();
+        log.info("RAG 流式请求: userId={}, subjectId={}, materialId={}", userId, subjectId, materialId);
+
+        if (materialId != null) {
+            validateMaterial(userId, subjectId, materialId);
+            String context = documentIngestionService.getMaterialContext(userId, materialId, MATERIAL_CONTEXT_CHUNKS);
+            if (context == null || context.isBlank()) {
+                log.warn("指定资料无可用切片，流式回落到无资料应答: materialId={}", materialId);
+                return answerNoDataStream(question);
+            }
+            return answerFromContextStream(question, context);
+        }
+
+        List<Document> chunks = documentIngestionService.retrieve(userId, subjectId, question, TOP_K);
+        log.info("未指定资料，流式关键词检索: subjectId={}, 命中切片数={}", subjectId, chunks == null ? 0 : chunks.size());
+        if (chunks != null && chunks.size() >= MIN_HITS) {
+            return answerFromMaterialsStream(question, chunks);
+        }
+        log.warn("关键词检索未命中，流式回落到无资料应答: subjectId={}", subjectId);
+        return answerNoDataStream(question);
+    }
+
+    private Long validateUserAndSubject(ChatRequest request) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        if (userId == null) {
+            throw new IllegalArgumentException("未登录");
+        }
+
+        Long subjectId = request.getSubjectId();
+        if (subjectId == null || !subjectRepository.existsByIdAndUserId(subjectId, userId)) {
+            throw new IllegalArgumentException("学科不存在或无权访问");
+        }
+        return userId;
+    }
+
+    private void validateMaterial(Long userId, Long subjectId, Long materialId) {
+        if (!materialRepository.existsByIdAndUserIdAndSubjectId(materialId, userId, subjectId)) {
+            throw new IllegalArgumentException("资料不存在或不属于该学科");
+        }
+    }
+
     private ChatResponse answerFromMaterials(String question, List<Document> chunks, List<SourceItem> sources) {
         StringBuilder contextBuilder = new StringBuilder();
         for (int i = 0; i < chunks.size(); i++) {
             Document chunk = chunks.get(i);
-            contextBuilder.append("【片段").append(i + 1).append("】\n")
+            String sourceName = (String) chunk.getMetadata().getOrDefault("source", "未知资料");
+            contextBuilder.append("【").append(sourceName).append("】\n")
                     .append(chunk.getText())
                     .append("\n\n");
 
@@ -108,7 +149,7 @@ public class RagServiceImpl implements RagService {
                 .system("""
                         你是一个复习资料智能助手。请基于以下参考资料回答用户的问题。
                         如果参考资料中有相关内容，请优先使用资料中的信息。
-                        在回答末尾注明信息来源的片段编号。
+                        在回答末尾注明信息来源的文件名。
 
                         参考资料：
                         %s
@@ -144,6 +185,41 @@ public class RagServiceImpl implements RagService {
                 .content();
 
         return new ChatResponse(answer != null ? answer : "", List.of());
+    }
+
+    private Flux<String> answerFromMaterialsStream(String question, List<Document> chunks) {
+        StringBuilder contextBuilder = new StringBuilder();
+        for (Document chunk : chunks) {
+            String sourceName = (String) chunk.getMetadata().getOrDefault("source", "未知资料");
+            contextBuilder.append("【").append(sourceName).append("】\n")
+                    .append(chunk.getText())
+                    .append("\n\n");
+        }
+
+        return answerFromContextStream(question, contextBuilder.toString());
+    }
+
+    private Flux<String> answerFromContextStream(String question, String context) {
+        return chatClient.prompt()
+                .system("""
+                        你是一个复习资料智能助手。请基于以下参考资料回答用户的问题。
+                        如果参考资料中有相关内容，请优先使用资料中的信息。
+                        在回答末尾注明信息来源的文件名。
+
+                        参考资料：
+                        %s
+                        """.formatted(context))
+                .user(question)
+                .stream()
+                .content();
+    }
+
+    private Flux<String> answerNoDataStream(String question) {
+        return chatClient.prompt()
+                .system("你是一个智能助手。用户的问题目前没有相关的复习资料，请根据你的知识回答。")
+                .user(question)
+                .stream()
+                .content();
     }
 
     private String truncate(String text, int maxLen) {

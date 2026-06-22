@@ -81,55 +81,55 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
     }
 
     private List<Document> retrieveFromChunks(List<MaterialChunk> candidateChunks, Long userId, String query, int topK) {
-        // 关键词检索（支持子串匹配，提高 OCR 容错）
-        String[] keywords = query.toLowerCase().split("[\\s,，。.、？?！!；;：:()（）\"'\\[\\]{}]");
-
+        // n-gram 检索（2-gram + 3-gram，中英文通用），同时保留文件名关键字匹配。
         List<Document> results = new ArrayList<>();
         String queryLower = query.toLowerCase();
+        Set<String> queryGrams = generateNGrams(queryLower, 2);
+        queryGrams.addAll(generateNGrams(queryLower, 3));
 
         for (MaterialChunk chunk : candidateChunks) {
             String text = chunk.getText().toLowerCase();
             String sourceInfo = chunk.getSource().toLowerCase();
-            int matchCount = 0;
-            int totalValidKeywords = 0;
 
-            for (String kw : keywords) {
-                if (kw.length() < 2) continue;
-                totalValidKeywords++;
+            boolean exactMatch = text.contains(queryLower) || sourceInfo.contains(queryLower);
+            Set<String> textGrams = generateNGrams(text, 2);
+            textGrams.addAll(generateNGrams(text, 3));
+            long overlap = textGrams.stream().filter(queryGrams::contains).count();
+            double overlapRate = queryGrams.isEmpty() ? 0 : (double) overlap / queryGrams.size();
 
-                // 匹配文本内容
-                if (text.contains(kw)) {
-                    matchCount++;
-                    continue;
+            boolean sourceMatch = false;
+            for (String kw : queryLower.split("[\\s,，。.、？?！!；;：:()（）\"'\\[\\]{}]")) {
+                if (kw.length() >= 2 && sourceInfo.contains(kw)) {
+                    sourceMatch = true;
+                    break;
                 }
+            }
 
-                // 匹配文件名（解决"图片里写了什么"这类问题）
-                if (sourceInfo.contains(kw)) {
-                    matchCount++;
-                    continue;
-                }
+            double score = 0;
+            if (exactMatch) score += 1.0;
+            if (sourceMatch) score += 0.8;
+            score += overlapRate * 0.5;
 
-                // 长关键词用子串匹配（提高 OCR 容错）
-                if (kw.length() >= 6) {
-                    String sub = kw.substring(0, Math.min(6, kw.length()));
-                    if (text.contains(sub)) {
-                        matchCount++;
+            if (score == 0) {
+                for (String kw : queryLower.split("[\\s,，。.、？?！!；;：:()（）\"'\\[\\]{}]")) {
+                    if (kw.length() < 2) continue;
+                    if (text.contains(kw)) {
+                        score += 0.2;
+                        break;
+                    }
+                    if (sourceInfo.contains(kw)) {
+                        score += 0.2;
+                        break;
                     }
                 }
             }
 
-            // 也检查整个查询是否在文本中
-            if (text.contains(queryLower)) {
-                matchCount = Math.max(matchCount, totalValidKeywords);
-            }
-
-            if (matchCount > 0) {
+            if (score > 0) {
                 Document doc = new Document(chunk.getText(), Map.of(
                         "userId", userId.toString(),
                         "materialId", chunk.getMaterialId().toString(),
                         "source", chunk.getSource()
                 ));
-                double score = totalValidKeywords > 0 ? (double) matchCount / totalValidKeywords : 0;
                 doc.getMetadata().put("score", score);
                 results.add(doc);
             }
@@ -144,8 +144,10 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
 
         List<Document> topResults = results.stream().limit(topK).collect(Collectors.toList());
         if (!topResults.isEmpty()) {
-            log.info("关键词检索命中: query={}, 结果数={}, 最高分={}",
+            log.info("检索命中: query={}, 结果数={}, 最高分={}",
                     query, topResults.size(), topResults.get(0).getMetadata().get("score"));
+        } else {
+            log.warn("检索无命中: query='{}', 候选切片数={}", query, candidateChunks.size());
         }
         return topResults;
     }
@@ -181,6 +183,18 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
     public void removeByMaterial(Long materialId) {
         materialChunkRepository.deleteByMaterialId(materialId);
         log.info("已清理资料: materialId={}", materialId);
+    }
+
+    /** 生成字符级 n-gram。 */
+    private Set<String> generateNGrams(String text, int n) {
+        Set<String> grams = new HashSet<>();
+        if (text == null || text.length() < n) {
+            return grams;
+        }
+        for (int i = 0; i <= text.length() - n; i++) {
+            grams.add(text.substring(i, i + n));
+        }
+        return grams;
     }
 
     /**

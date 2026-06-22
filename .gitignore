@@ -26,6 +26,7 @@ replay_pid*
 # IDE
 /.idea/
 /.reasonix/
+reasonix.toml
 *.iml
 .vscode/
 
