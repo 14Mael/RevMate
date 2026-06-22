@@ -57,7 +57,8 @@ public class RagServiceImpl implements RagService {
         StringBuilder contextBuilder = new StringBuilder();
         for (int i = 0; i < chunks.size(); i++) {
             Document chunk = chunks.get(i);
-            contextBuilder.append("【片段").append(i + 1).append("】\n")
+            String sourceName = (String) chunk.getMetadata().getOrDefault("source", "未知资料");
+            contextBuilder.append("【").append(sourceName).append("】\n")
                     .append(chunk.getText())
                     .append("\n\n");
 
@@ -74,7 +75,7 @@ public class RagServiceImpl implements RagService {
                 .system("""
                         你是一个复习资料智能助手。请基于以下参考资料回答用户的问题。
                         如果参考资料中有相关内容，请优先使用资料中的信息。
-                        在回答末尾注明信息来源的片段编号。
+                        在回答末尾注明信息来源的文件名。
 
                         参考资料：
                         %s

@@ -51,3 +51,4 @@ data/
 .DS_Store
 Thumbs.db
 /test/
+/reasonix.toml
