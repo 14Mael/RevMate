@@ -12,10 +12,12 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { chatStream } from '@/api/chat'
+import { chatStreamWithFallback, getHistoryList, saveHistory, generateHistoryId } from '@/api/chat'
 import { listSubjects } from '@/api/subject'
-import { PhPaperPlaneTilt, PhSparkle, PhBookOpen, PhQuotes, PhCaretDown } from '@/components/icons'
-import type { AnswerMode, ChatHistoryMessage, Source, Subject } from '@/api/types'
+import { renderMarkdown } from '@/utils/markdown'
+import ChatHistoryPanel from '@/components/ChatHistoryPanel.vue'
+import { PhPaperPlaneTilt, PhSparkle, PhBookOpen, PhQuotes, PhCaretDown, PhClockCounterClockwise } from '@/components/icons'
+import type { ChatHistoryItem, Source, Subject } from '@/api/types'
 
 const route = useRoute()
 
@@ -28,19 +30,73 @@ interface ChatMessage {
   sources: Source[]
   isStreaming: boolean
   quote?: string
-  answerMode?: AnswerMode
 }
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const isGenerating = ref(false)
 const selectedSubjectId = ref<number | ''>('')
-const selectedMaterialId = ref<number | undefined>()
-const selectedMaterialName = ref('')
 const subjects = ref<Subject[]>([])
 const quoteFromPreview = ref('')
 
 const chatContainer = ref<HTMLDivElement>()
+
+/* ==================== 历史记录 ==================== */
+
+const sessionId = ref(generateHistoryId())
+const historyList = ref<ChatHistoryItem[]>([])
+const historyPanelVisible = ref(false)
+const subjectNameMap = ref<Record<number, string>>({})
+
+function refreshHistoryList() {
+  historyList.value = getHistoryList()
+}
+
+function currentSessionTitle(): string {
+  const firstUser = messages.value.find((m) => m.role === 'user')
+  if (firstUser) return firstUser.content.slice(0, 40)
+  return '新对话'
+}
+
+function persistCurrentSession() {
+  if (messages.value.length === 0) return
+  const title = currentSessionTitle()
+  const historyMessages = messages.value.map((m) => ({
+    role: m.role,
+    content: m.content,
+    timestamp: new Date().toISOString()
+  }))
+  saveHistory({
+    id: sessionId.value,
+    title,
+    messages: historyMessages,
+    createdAt: new Date().toISOString(),
+    subjectId: selectedSubjectId.value as number,
+    course: subjectNameMap.value[selectedSubjectId.value as number] || undefined
+  })
+  refreshHistoryList()
+}
+
+function loadSession(item: ChatHistoryItem) {
+  sessionId.value = item.id
+  messages.value = item.messages.map((m, i) => ({
+    id: nextId++,
+    role: m.role,
+    content: m.content,
+    sources: [],
+    isStreaming: false
+  }))
+  // 恢复课程选择
+  if (item.subjectId) {
+    selectedSubjectId.value = item.subjectId
+  }
+}
+
+function startNewSession() {
+  sessionId.value = generateHistoryId()
+  messages.value = []
+  nextId = 1
+}
 
 /* ==================== 初始化 ==================== */
 
@@ -54,9 +110,18 @@ onMounted(async () => {
   // 加载课程列表
   try {
     subjects.value = await listSubjects()
-    applyRouteScope()
+    selectedSubjectId.value = subjects.value[0]?.id ?? ''
+    subjects.value.forEach((s) => {
+      subjectNameMap.value[s.id] = s.name
+    })
   } catch {
     subjects.value = []
+  }
+  // 加载最近一次历史
+  refreshHistoryList()
+  const latest = historyList.value[0]
+  if (latest) {
+    loadSession(latest)
   }
 })
 
@@ -74,7 +139,6 @@ async function sendMessage() {
 
   const quote = quoteFromPreview.value || undefined
   const question = quote ? `${text}\n\n引用内容：${quote}` : text
-  const history = buildHistory()
   quoteFromPreview.value = ''
 
   // 添加用户消息
@@ -104,19 +168,17 @@ async function sendMessage() {
   scrollToBottom()
 
   try {
-    const gen = chatStream({
+    const gen = chatStreamWithFallback({
       subjectId: selectedSubjectId.value,
-      materialId: selectedMaterialId.value,
-      question,
-      history
+      question
     })
     for await (const chunk of gen) {
       streamingMsg.content += chunk.text
       if (chunk.done) {
         streamingMsg.sources = chunk.sources
-        streamingMsg.answerMode = chunk.answerMode
         streamingMsg.isStreaming = false
         isGenerating.value = false
+        persistCurrentSession()
       }
       scrollToBottom()
     }
@@ -164,84 +226,7 @@ function clearQuote() {
   inputText.value = ''
 }
 
-function clearSelectedMaterial() {
-  selectedMaterialId.value = undefined
-  selectedMaterialName.value = ''
-}
-
-function handleSubjectChange() {
-  clearSelectedMaterial()
-}
-
-function applyRouteScope() {
-  const routeSubjectId = parseRouteNumber(route.query.subjectId)
-  if (routeSubjectId && subjects.value.some((subject) => subject.id === routeSubjectId)) {
-    selectedSubjectId.value = routeSubjectId
-  } else {
-    selectedSubjectId.value = subjects.value[0]?.id ?? ''
-  }
-  selectedMaterialId.value = parseRouteNumber(route.query.materialId)
-  selectedMaterialName.value = typeof route.query.materialName === 'string' ? route.query.materialName : ''
-}
-
-function parseRouteNumber(value: unknown): number | undefined {
-  const raw = Array.isArray(value) ? value[0] : value
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
-}
-
-function buildHistory(): ChatHistoryMessage[] {
-  return messages.value
-    .filter((message) => !message.isStreaming && message.content.trim())
-    .slice(-6)
-    .map((message) => ({
-      role: message.role,
-      content: message.content.trim()
-    }))
-}
-
-const answerModeText: Record<AnswerMode, string> = {
-  material: '资料回答',
-  general: '通用知识',
-  web: '网页资料'
-}
-
 const showWelcome = computed(() => messages.value.length === 0)
-
-/** 简易 Markdown 渲染（支持 **bold**, `code`, ```code block```, 换行，表格，列表） */
-function renderMarkdown(text: string): string {
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-
-  // 代码块
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="md-code-block"><code>$2</code></pre>')
-  // 行内代码
-  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
-  // 粗体
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  // 表格分隔行
-  html = html.replace(/\|(.+)\|/g, (match: string) => {
-    if (match.includes('---')) return ''
-    const cells = match.split('|').filter(Boolean).map((c: string) => c.trim())
-    const row = cells.map((c: string) => `<td>${c}</td>`).join('')
-    return `<tr>${row}</tr>`
-  })
-  // 包装连续 <tr> 为 <table>
-  html = html.replace(/(<tr>[\s\S]*?<\/tr>)+/g, '<table class="md-table">$&</table>')
-  // 无序列表
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>')
-  html = html.replace(/(<li>[\s\S]*?<\/li>)+/g, '<ul class="md-list">$&</ul>')
-  // 有序列表
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-  // 换行
-  html = html.replace(/\n\n/g, '</p><p>')
-  html = html.replace(/\n/g, '<br>')
-  html = `<p>${html}</p>`
-
-  return html
-}
 
 /** 来源图标 */
 const sourceIcon = {
@@ -262,9 +247,12 @@ const sourceIcon = {
         </div>
       </div>
       <div class="header-right">
+        <button class="history-btn" @click="historyPanelVisible = true" title="历史记录">
+          <PhClockCounterClockwise :size="16" />
+        </button>
         <div class="course-selector">
           <PhBookOpen :size="16" class="course-icon" />
-          <select v-model.number="selectedSubjectId" class="course-select" @change="handleSubjectChange">
+          <select v-model.number="selectedSubjectId" class="course-select">
             <option disabled value="">选择课程</option>
             <option v-for="subject in subjects" :key="subject.id" :value="subject.id">{{ subject.name }}</option>
           </select>
@@ -278,12 +266,6 @@ const sourceIcon = {
       <PhQuotes :size="16" class="quote-icon" />
       <span class="quote-text">基于选中的内容提问：{{ quoteFromPreview }}</span>
       <button class="quote-clear" @click="clearQuote">清除</button>
-    </div>
-
-    <div v-if="selectedMaterialId" class="scope-bar">
-      <PhBookOpen :size="16" class="scope-icon" />
-      <span class="scope-text">当前限定资料：{{ selectedMaterialName || `资料 #${selectedMaterialId}` }}</span>
-      <button class="scope-clear" @click="clearSelectedMaterial">清除</button>
     </div>
 
     <!-- 消息区域 -->
@@ -331,9 +313,6 @@ const sourceIcon = {
         <!-- AI 消息 -->
         <template v-else>
           <div class="msg-bubble ai-bubble">
-            <div v-if="msg.answerMode && !msg.isStreaming" class="answer-mode" :class="`mode-${msg.answerMode}`">
-              {{ answerModeText[msg.answerMode] }}
-            </div>
             <div class="msg-text markdown-body" v-html="renderMarkdown(msg.content)" />
             <span v-if="msg.isStreaming" class="typing-indicator">
               <span class="dot" />
@@ -384,6 +363,17 @@ const sourceIcon = {
       </div>
       <p class="input-hint">按 Enter 发送，Shift+Enter 换行</p>
     </footer>
+
+    <!-- 历史记录面板 -->
+    <ChatHistoryPanel
+      :visible="historyPanelVisible"
+      :active-id="sessionId"
+      :histories="historyList"
+      :courses="subjectNameMap"
+      @close="historyPanelVisible = false"
+      @load="loadSession"
+      @updated="refreshHistoryList"
+    />
   </div>
 </template>
 
@@ -438,6 +428,23 @@ const sourceIcon = {
   display: flex;
   align-items: center;
   gap: var(--space-md);
+}
+
+.history-btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-assist);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+.history-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .course-selector {
@@ -510,44 +517,6 @@ const sourceIcon = {
   text-decoration: underline;
 }
 .quote-clear:hover {
-  color: var(--color-text-body);
-}
-
-.scope-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-xl);
-  background: #F7FAFF;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-body);
-  flex-shrink: 0;
-  font-size: var(--font-size-small);
-}
-
-.scope-icon {
-  color: var(--color-primary);
-  flex-shrink: 0;
-}
-
-.scope-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.scope-clear {
-  border: 0;
-  background: transparent;
-  color: var(--color-text-assist);
-  font-size: var(--font-size-small);
-  cursor: pointer;
-  flex-shrink: 0;
-  text-decoration: underline;
-}
-.scope-clear:hover {
   color: var(--color-text-body);
 }
 
@@ -650,14 +619,19 @@ const sourceIcon = {
   border-radius: var(--radius-lg);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .user-bubble {
   background: var(--color-primary);
   color: #fff;
   max-width: 72%;
+  width: fit-content;
   border-bottom-right-radius: var(--radius-sm);
+}
+
+.msg-text {
+  white-space: pre-wrap;
 }
 
 .ai-bubble {
@@ -666,31 +640,6 @@ const sourceIcon = {
   border: 1px solid var(--color-border);
   max-width: 100%;
   border-bottom-left-radius: var(--radius-sm);
-}
-
-.answer-mode {
-  display: inline-flex;
-  align-items: center;
-  margin-bottom: var(--space-sm);
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-caption);
-  font-weight: 600;
-}
-
-.mode-material {
-  color: var(--color-primary);
-  background: var(--color-primary-light);
-}
-
-.mode-general {
-  color: var(--color-warning);
-  background: #FFFBE6;
-}
-
-.mode-web {
-  color: var(--color-success);
-  background: #F0FFF0;
 }
 
 .msg-quote {

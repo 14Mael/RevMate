@@ -68,6 +68,16 @@ export type AnswerMode = 'material' | 'general' | 'web'
 export interface ChatHistoryMessage {
   role: 'user' | 'assistant'
   content: string
+  timestamp?: string
+}
+
+export interface ChatHistoryItem {
+  id: string
+  title: string
+  messages: ChatHistoryMessage[]
+  createdAt: string
+  subjectId: number
+  course?: string
 }
 
 export interface Source {

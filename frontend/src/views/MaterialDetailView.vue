@@ -2,12 +2,13 @@
 /**
  * 资料详情预览页
  * - 主区：浏览器内置 PDF 查看器（iframe），支持文本选择、缩放、翻页
- * - 顶部工具栏：返回、文件名、下载
- * - 通过鉴权请求获取后端 PDF blob 后交给 iframe 预览
+ * - 右侧边栏：针对当前资料的问答
+ * - 顶部工具栏：返回、文件名、下载、侧边栏切换
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PhArrowLeft, PhDownloadSimple, PhFileText, PhSparkle, PhWarning } from '@/components/icons'
+import { PhArrowLeft, PhChat, PhDownloadSimple, PhFileText, PhWarning } from '@/components/icons'
+import MaterialChatSidebar from '@/components/MaterialChatSidebar.vue'
 import { getMaterial, getPreviewUrl, canPreview } from '@/api/material'
 import type { Material } from '@/api/types'
 
@@ -19,10 +20,10 @@ const material = ref<Material | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const previewUrl = ref('')
+const sidebarOpen = ref(true)
 
 const previewAvailable = computed(() => !!material.value && canPreview(material.value) && !!previewUrl.value)
 
-// 选中的文本（iframe 内文本选中后 Ctrl+C 复制，这里不做联动，浏览器原生支持）
 const selectedText = ref('')
 const selectionTipVisible = ref(false)
 
@@ -54,20 +55,11 @@ function goBack() {
   router.push('/materials')
 }
 
-function askAboutMaterial() {
-  if (!material.value) return
-  router.push({
-    path: '/home',
-    query: {
-      subjectId: String(material.value.subjectId),
-      materialId: String(material.value.id),
-      materialName: material.value.filename
-    }
-  })
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value
 }
 
-// 文本选中提示：iframe 内的选中文字通过浏览器原生支持复制
-// 未来可在此接入「选中文字提问」→ 跳转 /home?quote=xxx
+// 文本选中提示
 function handleMouseUp() {
   const selection = window.getSelection()
   const text = selection?.toString().trim() || ''
@@ -112,9 +104,14 @@ onUnmounted(() => {
       <div v-else class="file-info placeholder">加载中...</div>
 
       <div class="toolbar-right">
-        <button class="ask-btn" type="button" :disabled="!material" @click="askAboutMaterial">
-          <PhSparkle :size="16" />
-          基于此资料提问
+        <button
+          class="sidebar-toggle-btn"
+          :class="{ active: sidebarOpen }"
+          @click="toggleSidebar"
+          title="问答侧边栏"
+        >
+          <PhChat :size="16" />
+          <span>问答</span>
         </button>
         <a class="download-btn" :href="previewUrl || undefined" :download="material?.filename || 'preview.pdf'">
           <PhDownloadSimple :size="16" />
@@ -123,37 +120,47 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <!-- 预览区 -->
-    <main class="preview-area">
-      <div v-if="loadError" class="error-state">
-        <p>{{ loadError }}</p>
-        <button class="back-btn" @click="goBack">返回资料列表</button>
-      </div>
+    <!-- 主区域：PDF + 侧边栏 -->
+    <div class="detail-main">
+      <!-- PDF 预览区 -->
+      <main class="preview-area">
+        <div v-if="loadError" class="error-state">
+          <p>{{ loadError }}</p>
+          <button class="back-btn" @click="goBack">返回资料列表</button>
+        </div>
 
-      <div v-else-if="loading" class="loading-state">
-        <span>正在加载文档...</span>
-      </div>
+        <div v-else-if="loading" class="loading-state">
+          <span>正在加载文档...</span>
+        </div>
 
-      <!-- 不可预览 -->
-      <div v-else-if="!previewAvailable" class="no-preview-state">
-        <PhWarning :size="40" weight="duotone" />
-        <h3>暂不支持预览</h3>
-        <p>
-          当前资料还没有可用的 PDF 预览。
-        </p>
-        <p class="hint">{{ material?.previewMessage || '如果是 Office 文档，请稍后刷新；如果处理失败，请检查文件或 LibreOffice 环境。' }}</p>
-        <button class="back-btn" @click="goBack">返回资料列表</button>
-      </div>
+        <!-- 不可预览 -->
+        <div v-else-if="!previewAvailable" class="no-preview-state">
+          <PhWarning :size="40" weight="duotone" />
+          <h3>暂不支持预览</h3>
+          <p>当前资料还没有可用的 PDF 预览。</p>
+          <p class="hint">{{ material?.previewMessage || '如果是 Office 文档，请稍后刷新；如果处理失败，请检查文件或 LibreOffice 环境。' }}</p>
+          <button class="back-btn" @click="goBack">返回资料列表</button>
+        </div>
 
-      <!-- 浏览器内置 PDF 查看器 -->
-      <iframe
-        v-else
-        class="pdf-iframe"
-        :src="previewUrl"
-        frameborder="0"
-        title="PDF Preview"
+        <!-- 浏览器内置 PDF 查看器 -->
+        <iframe
+          v-else
+          class="pdf-iframe"
+          :src="previewUrl"
+          frameborder="0"
+          title="PDF Preview"
+        />
+      </main>
+
+      <!-- 侧边栏问答 -->
+      <MaterialChatSidebar
+        v-if="sidebarOpen && material && previewAvailable"
+        :material-id="material.id"
+        :subject-id="material.subjectId"
+        :material-name="material.filename"
+        @close="sidebarOpen = false"
       />
-    </main>
+    </div>
   </div>
 </template>
 
@@ -235,6 +242,29 @@ onUnmounted(() => {
   gap: var(--space-md);
 }
 
+.sidebar-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-body);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  font-size: var(--font-size-body);
+}
+.sidebar-toggle-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.sidebar-toggle-btn.active {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
 .download-btn {
   display: inline-flex;
   align-items: center;
@@ -257,34 +287,20 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-.ask-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-card-bg);
-  color: var(--color-primary);
-  font-size: var(--font-size-body);
-  cursor: pointer;
-  transition: all var(--duration-fast);
-}
-.ask-btn:hover:not(:disabled) {
-  border-color: var(--color-primary);
-  background: var(--color-primary-light);
-}
-.ask-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+/* ---------- 主区域 ---------- */
+.detail-main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
 }
 
 /* ---------- 预览区 ---------- */
 .preview-area {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   position: relative;
-  background: #525659; /* 浏览器 PDF 查看器的典型暗色背景 */
+  background: #525659;
 }
 
 .pdf-iframe {

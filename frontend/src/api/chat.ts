@@ -1,5 +1,5 @@
 import { request } from './http'
-import type { AnswerMode, ChatRequest, ChatResponse, ChatStreamEvent, Source } from './types'
+import type { AnswerMode, ChatHistoryItem, ChatRequest, ChatResponse, ChatStreamEvent, Source } from './types'
 
 const DISPLAY_CHUNK_SIZE = 4
 const DISPLAY_CHUNK_DELAY_MS = 24
@@ -56,9 +56,60 @@ export async function* chatStream(
   }
 }
 
+/**
+ * 组合流式：组件统一调用此入口。当前直接走真后端 SSE（chatStream）。
+ * 历史上 frontend 分支用它在后端未就绪时降级到纯前端 mock，现已接通真后端。
+ */
+export async function* chatStreamWithFallback(
+  payload: ChatRequest
+): AsyncGenerator<{ text: string; done: boolean; sources: Source[]; answerMode?: AnswerMode }> {
+  yield* chatStream(payload)
+}
+
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem('revmate_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+/* ========== 聊天历史（localStorage） ========== */
+
+const HISTORY_KEY = 'revmate_chat_history'
+const MAX_HISTORY = 50
+
+function loadHistory(): ChatHistoryItem[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    return raw ? (JSON.parse(raw) as ChatHistoryItem[]) : []
+  } catch {
+    return []
+  }
+}
+
+function saveHistoryList(list: ChatHistoryItem[]): void {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, MAX_HISTORY)))
+}
+
+export function getHistoryList(): ChatHistoryItem[] {
+  return loadHistory().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+}
+
+export function saveHistory(session: ChatHistoryItem): void {
+  const list = loadHistory().filter((item) => item.id !== session.id)
+  list.unshift(session)
+  saveHistoryList(list)
+}
+
+export function deleteHistory(id: string): void {
+  const list = loadHistory().filter((item) => item.id !== id)
+  saveHistoryList(list)
+}
+
+export function clearAllHistory(): void {
+  localStorage.removeItem(HISTORY_KEY)
+}
+
+export function generateHistoryId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
 function parseSseBuffer(buffer: string, flush = false): { events: ChatStreamEvent[]; rest: string } {
