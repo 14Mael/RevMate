@@ -350,7 +350,26 @@ const sourceIcon: Record<string, typeof PhBookOpen> = {
   font-weight: 700;
 }
 
-.markdown-body :deep(.md-inline-code) {
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  color: var(--color-text-title);
+  font-weight: 700;
+  line-height: 1.35;
+  margin: var(--space-sm) 0 var(--space-xs);
+  font-size: 1.05em;
+}
+.markdown-body :deep(*:first-child) {
+  margin-top: 0;
+}
+
+.markdown-body :deep(a) {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.markdown-body :deep(code) {
   padding: 1px 4px;
   border-radius: var(--radius-sm);
   background: var(--color-card-bg);
@@ -359,7 +378,7 @@ const sourceIcon: Record<string, typeof PhBookOpen> = {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
-.markdown-body :deep(.md-code-block) {
+.markdown-body :deep(pre) {
   margin: var(--space-sm) 0;
   padding: var(--space-sm);
   border-radius: var(--radius-sm);
@@ -367,17 +386,16 @@ const sourceIcon: Record<string, typeof PhBookOpen> = {
   border: 1px solid var(--color-border);
   overflow-x: auto;
   font-size: var(--font-size-caption);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   line-height: 1.5;
 }
 
-.markdown-body :deep(.md-code-block code) {
+.markdown-body :deep(pre code) {
   background: transparent;
   padding: 0;
   color: var(--color-text-body);
 }
 
-.markdown-body :deep(.md-table) {
+.markdown-body :deep(table) {
   width: 100%;
   border-collapse: collapse;
   margin: var(--space-sm) 0;
@@ -387,26 +405,38 @@ const sourceIcon: Record<string, typeof PhBookOpen> = {
   overflow: hidden;
 }
 
-.markdown-body :deep(.md-table td) {
+.markdown-body :deep(th) {
+  padding: var(--space-xs) var(--space-sm);
+  text-align: left;
+  font-weight: 700;
+  color: var(--color-text-title);
+  background: var(--color-card-bg);
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+}
+
+.markdown-body :deep(td) {
   padding: var(--space-xs) var(--space-sm);
   border-bottom: 1px solid var(--color-border);
   border-right: 1px solid var(--color-border);
 }
 
-.markdown-body :deep(.md-table tr:last-child td) {
+.markdown-body :deep(tr:last-child td) {
   border-bottom: 0;
 }
 
-.markdown-body :deep(.md-table td:last-child) {
+.markdown-body :deep(th:last-child),
+.markdown-body :deep(td:last-child) {
   border-right: 0;
 }
 
-.markdown-body :deep(.md-list) {
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
   margin: var(--space-xs) 0;
   padding-left: var(--space-lg);
 }
 
-.markdown-body :deep(.md-list li) {
+.markdown-body :deep(li) {
   margin-bottom: 2px;
 }
 
