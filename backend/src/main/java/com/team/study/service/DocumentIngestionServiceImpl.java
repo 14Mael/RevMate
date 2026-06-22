@@ -64,11 +64,12 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
 
     @Override
     public List<Document> retrieve(Long userId, String query, int topK) {
-        // 关键词检索（支持子串匹配，提高 OCR 容错）
-        String[] keywords = query.toLowerCase().split("[\\s,，。.、？?！!；;：:()（）\"'\\[\\]{}]");
+        // n-gram 检索（2-gram + 3-gram，中英文通用）
+        String queryLower = query.toLowerCase();
+        Set<String> queryGrams = generateNGrams(queryLower, 2);
+        queryGrams.addAll(generateNGrams(queryLower, 3));
 
         List<Document> results = new ArrayList<>();
-        String queryLower = query.toLowerCase();
 
         for (Map.Entry<Long, List<ChunkInfo>> entry : store.entrySet()) {
             for (ChunkInfo chunk : entry.getValue()) {
@@ -76,63 +77,62 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
 
                 String text = chunk.text.toLowerCase();
                 String sourceInfo = chunk.source.toLowerCase();
-                int matchCount = 0;
-                int totalValidKeywords = 0;
 
-                for (String kw : keywords) {
-                    if (kw.length() < 2) continue;
-                    totalValidKeywords++;
+                // 1. 完整查询匹配文件名或内容（最高权重）
+                boolean exactMatch = text.contains(queryLower) || sourceInfo.contains(queryLower);
 
-                    // 匹配文本内容
-                    if (text.contains(kw)) {
-                        matchCount++;
-                        continue;
-                    }
+                // 2. n-gram 重叠率
+                Set<String> textGrams = generateNGrams(text, 2);
+                textGrams.addAll(generateNGrams(text, 3));
+                long overlap = textGrams.stream().filter(queryGrams::contains).count();
+                double overlapRate = queryGrams.isEmpty() ? 0 : (double) overlap / queryGrams.size();
 
-                    // 匹配文件名（解决"图片里写了什么"这类问题）
-                    if (sourceInfo.contains(kw)) {
-                        matchCount++;
-                        continue;
-                    }
-
-                    // 长关键词用子串匹配（提高 OCR 容错）
-                    if (kw.length() >= 6) {
-                        String sub = kw.substring(0, Math.min(6, kw.length()));
-                        if (text.contains(sub)) {
-                            matchCount++;
-                        }
+                // 3. 文件名关键子串匹配
+                boolean sourceMatch = false;
+                for (String kw : queryLower.split("[\\s,，。.、？?！!；;：:()（）\"'\\[\\]{}]")) {
+                    if (kw.length() >= 2 && sourceInfo.contains(kw)) {
+                        sourceMatch = true;
+                        break;
                     }
                 }
 
-                // 也检查整个查询是否在文本中
-                if (text.contains(queryLower)) {
-                    matchCount = Math.max(matchCount, totalValidKeywords);
-                }
+                // 综合评分（阈值 0.3）
+                double score = 0;
+                if (exactMatch) score += 1.0;
+                if (sourceMatch) score += 0.8;
+                score += overlapRate * 0.5;
 
-                if (matchCount > 0) {
+                if (score > 0.3) {
                     Document doc = new Document(chunk.text, Map.of(
                             "userId", userId.toString(),
                             "materialId", entry.getKey().toString(),
                             "source", chunk.source
                     ));
-                    double score = totalValidKeywords > 0 ? (double) matchCount / totalValidKeywords : 0;
                     doc.getMetadata().put("score", score);
                     results.add(doc);
                 }
             }
         }
 
-        // 按匹配度排序
-        results.sort((a, b) -> {
-            double sa = (double) a.getMetadata().getOrDefault("score", 0.0);
-            double sb = (double) b.getMetadata().getOrDefault("score", 0.0);
-            return Double.compare(sb, sa);
-        });
+        results.sort((a, b) -> Double.compare(
+                (double) b.getMetadata().getOrDefault("score", 0.0),
+                (double) a.getMetadata().getOrDefault("score", 0.0)));
 
         List<Document> topResults = results.stream().limit(topK).collect(Collectors.toList());
         if (!topResults.isEmpty()) {
-            log.info("关键词检索命中: query={}, 结果数={}, 最高分={}",
+            log.info("检索命中: query={}, 结果数={}, 最高分={}",
                     query, topResults.size(), topResults.get(0).getMetadata().get("score"));
+        } else {
+            // 调试：列出当前用户的所有资料
+            List<String> sources = new ArrayList<>();
+            for (Map.Entry<Long, List<ChunkInfo>> entry : store.entrySet()) {
+                for (ChunkInfo chunk : entry.getValue()) {
+                    if (chunk.userId.equals(userId) && !sources.contains(chunk.source)) {
+                        sources.add(chunk.source);
+                    }
+                }
+            }
+            log.warn("检索无命中: query='{}', 用户资料文件={}", query, sources);
         }
         return topResults;
     }
