@@ -56,16 +56,6 @@ export async function* chatStream(
   }
 }
 
-/**
- * 组合流式：组件统一调用此入口。当前直接走真后端 SSE（chatStream）。
- * 历史上 frontend 分支用它在后端未就绪时降级到纯前端 mock，现已接通真后端。
- */
-export async function* chatStreamWithFallback(
-  payload: ChatRequest
-): AsyncGenerator<{ text: string; done: boolean; sources: Source[]; answerMode?: AnswerMode }> {
-  yield* chatStream(payload)
-}
-
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem('revmate_token')
   return token ? { Authorization: `Bearer ${token}` } : {}

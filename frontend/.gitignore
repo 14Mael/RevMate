@@ -7,11 +7,6 @@ dist/
 .env
 .env.local
 
-# 依赖锁文件（按项目规则：不追踪）
-package-lock.json
-pnpm-lock.yaml
-yarn.lock
-
 # unplugin 自动生成的类型声明（首次 dev/build 时再生成）
 auto-imports.d.ts
 components.d.ts

@@ -7,7 +7,7 @@
  */
 import { nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { chatStreamWithFallback } from '@/api/chat'
+import { chatStream } from '@/api/chat'
 import { renderMarkdown } from '@/utils/markdown'
 import { PhPaperPlaneTilt, PhSparkle, PhX, PhBookOpen } from '@/components/icons'
 import type { Source, Subject } from '@/api/types'
@@ -65,7 +65,7 @@ async function sendMessage() {
   scrollToBottom()
 
   try {
-    const gen = chatStreamWithFallback({
+    const gen = chatStream({
       subjectId: props.subjectId,
       materialId: props.materialId,
       question: text

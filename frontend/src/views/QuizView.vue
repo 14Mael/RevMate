@@ -67,7 +67,8 @@ async function loadData() {
     materials.value = matList
     if (subjList.length > 0) selectedSubjectId.value = subjList[0].id
   } catch {
-    // mock 阶段静默失败
+    errorMsg.value = '课程和资料加载失败，请刷新页面重试'
+    ElMessage.error(errorMsg.value)
   }
 }
 
@@ -475,7 +476,7 @@ function questionTypeLabel(q: Question): string {
               {{ q.stem }}
             </div>
 
-            <div v-if="q.wrongBookAdded || (!gradingResults[qi]?.correct && q.type !== 'qa')" class="wrong-book-note">
+            <div v-if="q.wrongBookAdded" class="wrong-book-note">
               已加入错题本
               <span v-if="q.wrongCount && q.wrongCount >= 2">，这道题你已经错了 {{ q.wrongCount }} 次</span>
             </div>

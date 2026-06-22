@@ -12,7 +12,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { chatStreamWithFallback, getHistoryList, saveHistory, generateHistoryId } from '@/api/chat'
+import { chatStream, getHistoryList, saveHistory, generateHistoryId } from '@/api/chat'
 import { listSubjects } from '@/api/subject'
 import { renderMarkdown } from '@/utils/markdown'
 import ChatHistoryPanel from '@/components/ChatHistoryPanel.vue'
@@ -176,7 +176,7 @@ async function sendMessage() {
   scrollToBottom()
 
   try {
-    const gen = chatStreamWithFallback({
+    const gen = chatStream({
       subjectId: selectedSubjectId.value,
       question
     })
