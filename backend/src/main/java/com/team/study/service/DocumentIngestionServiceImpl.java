@@ -155,6 +155,15 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
         log.info("已清理资料: materialId={}", materialId);
     }
 
+    /** 生成字符级 n-gram（2-gram 和 3-gram，对中英文通用） */
+    private Set<String> generateNGrams(String text, int n) {
+        Set<String> grams = new HashSet<>();
+        for (int i = 0; i <= text.length() - n; i++) {
+            grams.add(text.substring(i, i + n));
+        }
+        return grams;
+    }
+
     /**
      * 简单文本切片
      */
