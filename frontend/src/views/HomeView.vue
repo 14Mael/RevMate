@@ -48,8 +48,12 @@ const historyList = ref<ChatHistoryItem[]>([])
 const historyPanelVisible = ref(false)
 const subjectNameMap = ref<Record<number, string>>({})
 
-function refreshHistoryList() {
-  historyList.value = getHistoryList()
+async function refreshHistoryList() {
+  try {
+    historyList.value = await getHistoryList()
+  } catch {
+    historyList.value = []
+  }
 }
 
 function currentSessionTitle(): string {
@@ -58,7 +62,7 @@ function currentSessionTitle(): string {
   return '新对话'
 }
 
-function persistCurrentSession() {
+async function persistCurrentSession() {
   if (messages.value.length === 0) return
   const title = currentSessionTitle()
   const historyMessages = messages.value.map((m) => ({
@@ -66,15 +70,19 @@ function persistCurrentSession() {
     content: m.content,
     timestamp: new Date().toISOString()
   }))
-  saveHistory({
-    id: sessionId.value,
-    title,
-    messages: historyMessages,
-    createdAt: new Date().toISOString(),
-    subjectId: selectedSubjectId.value as number,
-    course: subjectNameMap.value[selectedSubjectId.value as number] || undefined
-  })
-  refreshHistoryList()
+  try {
+    await saveHistory({
+      id: sessionId.value,
+      title,
+      messages: historyMessages,
+      createdAt: new Date().toISOString(),
+      subjectId: selectedSubjectId.value as number,
+      course: subjectNameMap.value[selectedSubjectId.value as number] || undefined
+    })
+    await refreshHistoryList()
+  } catch {
+    // 历史保存失败不影响问答，静默忽略
+  }
 }
 
 function loadSession(item: ChatHistoryItem) {
@@ -118,7 +126,7 @@ onMounted(async () => {
     subjects.value = []
   }
   // 加载最近一次历史
-  refreshHistoryList()
+  await refreshHistoryList()
   const latest = historyList.value[0]
   if (latest) {
     loadSession(latest)
@@ -178,7 +186,7 @@ async function sendMessage() {
         streamingMsg.sources = chunk.sources
         streamingMsg.isStreaming = false
         isGenerating.value = false
-        persistCurrentSession()
+        await persistCurrentSession()
       }
       scrollToBottom()
     }
@@ -692,7 +700,29 @@ const sourceIcon = {
   font-weight: 700;
 }
 
-.markdown-body :deep(.md-inline-code) {
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  color: var(--color-text-title);
+  font-weight: 700;
+  line-height: 1.35;
+  margin: var(--space-md) 0 var(--space-sm);
+}
+.markdown-body :deep(h1) { font-size: 1.3em; }
+.markdown-body :deep(h2) { font-size: 1.2em; }
+.markdown-body :deep(h3) { font-size: 1.08em; }
+.markdown-body :deep(h4) { font-size: 1em; }
+.markdown-body :deep(*:first-child) {
+  margin-top: 0;
+}
+
+.markdown-body :deep(a) {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.markdown-body :deep(code) {
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   background: var(--color-page-bg);
@@ -701,7 +731,7 @@ const sourceIcon = {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
-.markdown-body :deep(.md-code-block) {
+.markdown-body :deep(pre) {
   margin: var(--space-md) 0;
   padding: var(--space-md);
   border-radius: var(--radius-md);
@@ -709,17 +739,16 @@ const sourceIcon = {
   border: 1px solid var(--color-border);
   overflow-x: auto;
   font-size: var(--font-size-small);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   line-height: 1.6;
 }
 
-.markdown-body :deep(.md-code-block code) {
+.markdown-body :deep(pre code) {
   background: transparent;
   padding: 0;
   color: var(--color-text-body);
 }
 
-.markdown-body :deep(.md-table) {
+.markdown-body :deep(table) {
   width: 100%;
   border-collapse: collapse;
   margin: var(--space-md) 0;
@@ -729,26 +758,38 @@ const sourceIcon = {
   overflow: hidden;
 }
 
-.markdown-body :deep(.md-table td) {
+.markdown-body :deep(th) {
+  padding: var(--space-sm) var(--space-md);
+  text-align: left;
+  font-weight: 700;
+  color: var(--color-text-title);
+  background: var(--color-page-bg);
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+}
+
+.markdown-body :deep(td) {
   padding: var(--space-sm) var(--space-md);
   border-bottom: 1px solid var(--color-border);
   border-right: 1px solid var(--color-border);
 }
 
-.markdown-body :deep(.md-table tr:last-child td) {
+.markdown-body :deep(tr:last-child td) {
   border-bottom: 0;
 }
 
-.markdown-body :deep(.md-table td:last-child) {
+.markdown-body :deep(th:last-child),
+.markdown-body :deep(td:last-child) {
   border-right: 0;
 }
 
-.markdown-body :deep(.md-list) {
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
   margin: var(--space-sm) 0;
   padding-left: var(--space-xl);
 }
 
-.markdown-body :deep(.md-list li) {
+.markdown-body :deep(li) {
   margin-bottom: var(--space-xs);
 }
 

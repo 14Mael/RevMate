@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS materials (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 聊天历史表：按用户隔离，messages_json 整段会话消息序列化为 JSON
+CREATE TABLE IF NOT EXISTS chat_histories (
+    id VARCHAR(64) PRIMARY KEY COMMENT '前端生成的会话 id',
+    user_id BIGINT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    subject_id BIGINT COMMENT '会话关联的学科',
+    course VARCHAR(100) COMMENT '学科名快照',
+    messages_json LONGTEXT COMMENT 'JSON 序列化的消息列表',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最近活跃时间，每次保存刷新',
+    INDEX idx_chat_histories_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- 资料切片表：持久化 RAG/出题上下文，避免服务重启后 READY 资料无法检索
 CREATE TABLE IF NOT EXISTS material_chunks (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

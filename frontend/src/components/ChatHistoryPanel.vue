@@ -8,7 +8,7 @@
 import { computed } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { PhTrash, PhX, PhWarning } from '@/components/icons'
-import { deleteHistory, clearAllHistory, getHistoryList } from '@/api/chat'
+import { deleteHistory, clearAllHistory } from '@/api/chat'
 import type { ChatHistoryItem } from '@/api/types'
 
 const props = defineProps<{
@@ -48,7 +48,7 @@ async function handleDelete(id: string, e: Event) {
       cancelButtonText: '取消',
       type: 'warning'
     })
-    deleteHistory(id)
+    await deleteHistory(id)
     emit('updated')
   } catch {
     // 取消
@@ -63,7 +63,7 @@ async function handleClearAll() {
       cancelButtonText: '取消',
       type: 'warning'
     })
-    clearAllHistory()
+    await clearAllHistory()
     emit('updated')
   } catch {
     // 取消

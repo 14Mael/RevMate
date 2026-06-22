@@ -71,41 +71,29 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/* ========== 聊天历史（localStorage） ========== */
+/* ========== 聊天历史（后端持久化，按账户隔离） ========== */
 
-const HISTORY_KEY = 'revmate_chat_history'
-const MAX_HISTORY = 50
-
-function loadHistory(): ChatHistoryItem[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY)
-    return raw ? (JSON.parse(raw) as ChatHistoryItem[]) : []
-  } catch {
-    return []
-  }
+/** 列表已由后端按最近活跃时间倒序返回 */
+export async function getHistoryList(): Promise<ChatHistoryItem[]> {
+  return request<ChatHistoryItem[]>({ url: '/chat/history', method: 'GET' })
 }
 
-function saveHistoryList(list: ChatHistoryItem[]): void {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, MAX_HISTORY)))
+/** 按会话 id upsert（id 走路径，保留「同一会话按 id 更新」语义） */
+export async function saveHistory(session: ChatHistoryItem): Promise<ChatHistoryItem> {
+  const { id, title, messages, subjectId, course } = session
+  return request<ChatHistoryItem>({
+    url: `/chat/history/${id}`,
+    method: 'PUT',
+    data: { title, messages, subjectId, course }
+  })
 }
 
-export function getHistoryList(): ChatHistoryItem[] {
-  return loadHistory().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+export async function deleteHistory(id: string): Promise<void> {
+  await request<void>({ url: `/chat/history/${id}`, method: 'DELETE' })
 }
 
-export function saveHistory(session: ChatHistoryItem): void {
-  const list = loadHistory().filter((item) => item.id !== session.id)
-  list.unshift(session)
-  saveHistoryList(list)
-}
-
-export function deleteHistory(id: string): void {
-  const list = loadHistory().filter((item) => item.id !== id)
-  saveHistoryList(list)
-}
-
-export function clearAllHistory(): void {
-  localStorage.removeItem(HISTORY_KEY)
+export async function clearAllHistory(): Promise<void> {
+  await request<void>({ url: '/chat/history', method: 'DELETE' })
 }
 
 export function generateHistoryId(): string {
