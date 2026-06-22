@@ -15,7 +15,7 @@ import { ElMessage } from 'element-plus'
 import { chatStream } from '@/api/chat'
 import { listSubjects } from '@/api/subject'
 import { PhPaperPlaneTilt, PhSparkle, PhBookOpen, PhQuotes, PhCaretDown } from '@/components/icons'
-import type { Source, Subject } from '@/api/types'
+import type { AnswerMode, ChatHistoryMessage, Source, Subject } from '@/api/types'
 
 const route = useRoute()
 
@@ -28,12 +28,15 @@ interface ChatMessage {
   sources: Source[]
   isStreaming: boolean
   quote?: string
+  answerMode?: AnswerMode
 }
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const isGenerating = ref(false)
 const selectedSubjectId = ref<number | ''>('')
+const selectedMaterialId = ref<number | undefined>()
+const selectedMaterialName = ref('')
 const subjects = ref<Subject[]>([])
 const quoteFromPreview = ref('')
 
@@ -51,7 +54,7 @@ onMounted(async () => {
   // 加载课程列表
   try {
     subjects.value = await listSubjects()
-    selectedSubjectId.value = subjects.value[0]?.id ?? ''
+    applyRouteScope()
   } catch {
     subjects.value = []
   }
@@ -71,6 +74,7 @@ async function sendMessage() {
 
   const quote = quoteFromPreview.value || undefined
   const question = quote ? `${text}\n\n引用内容：${quote}` : text
+  const history = buildHistory()
   quoteFromPreview.value = ''
 
   // 添加用户消息
@@ -100,12 +104,15 @@ async function sendMessage() {
   try {
     const gen = chatStream({
       subjectId: selectedSubjectId.value,
-      question
+      materialId: selectedMaterialId.value,
+      question,
+      history
     })
     for await (const chunk of gen) {
       aiMsg.content += chunk.text
       if (chunk.done) {
         aiMsg.sources = chunk.sources
+        aiMsg.answerMode = chunk.answerMode
         aiMsg.isStreaming = false
         isGenerating.value = false
       }
@@ -153,6 +160,48 @@ function scrollToBottom() {
 function clearQuote() {
   quoteFromPreview.value = ''
   inputText.value = ''
+}
+
+function clearSelectedMaterial() {
+  selectedMaterialId.value = undefined
+  selectedMaterialName.value = ''
+}
+
+function handleSubjectChange() {
+  clearSelectedMaterial()
+}
+
+function applyRouteScope() {
+  const routeSubjectId = parseRouteNumber(route.query.subjectId)
+  if (routeSubjectId && subjects.value.some((subject) => subject.id === routeSubjectId)) {
+    selectedSubjectId.value = routeSubjectId
+  } else {
+    selectedSubjectId.value = subjects.value[0]?.id ?? ''
+  }
+  selectedMaterialId.value = parseRouteNumber(route.query.materialId)
+  selectedMaterialName.value = typeof route.query.materialName === 'string' ? route.query.materialName : ''
+}
+
+function parseRouteNumber(value: unknown): number | undefined {
+  const raw = Array.isArray(value) ? value[0] : value
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function buildHistory(): ChatHistoryMessage[] {
+  return messages.value
+    .filter((message) => !message.isStreaming && message.content.trim())
+    .slice(-6)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim()
+    }))
+}
+
+const answerModeText: Record<AnswerMode, string> = {
+  material: '资料回答',
+  general: '通用知识',
+  web: '网页资料'
 }
 
 const showWelcome = computed(() => messages.value.length === 0)
@@ -213,7 +262,7 @@ const sourceIcon = {
       <div class="header-right">
         <div class="course-selector">
           <PhBookOpen :size="16" class="course-icon" />
-          <select v-model.number="selectedSubjectId" class="course-select">
+          <select v-model.number="selectedSubjectId" class="course-select" @change="handleSubjectChange">
             <option disabled value="">选择课程</option>
             <option v-for="subject in subjects" :key="subject.id" :value="subject.id">{{ subject.name }}</option>
           </select>
@@ -227,6 +276,12 @@ const sourceIcon = {
       <PhQuotes :size="16" class="quote-icon" />
       <span class="quote-text">基于选中的内容提问：{{ quoteFromPreview }}</span>
       <button class="quote-clear" @click="clearQuote">清除</button>
+    </div>
+
+    <div v-if="selectedMaterialId" class="scope-bar">
+      <PhBookOpen :size="16" class="scope-icon" />
+      <span class="scope-text">当前限定资料：{{ selectedMaterialName || `资料 #${selectedMaterialId}` }}</span>
+      <button class="scope-clear" @click="clearSelectedMaterial">清除</button>
     </div>
 
     <!-- 消息区域 -->
@@ -274,6 +329,9 @@ const sourceIcon = {
         <!-- AI 消息 -->
         <template v-else>
           <div class="msg-bubble ai-bubble">
+            <div v-if="msg.answerMode && !msg.isStreaming" class="answer-mode" :class="`mode-${msg.answerMode}`">
+              {{ answerModeText[msg.answerMode] }}
+            </div>
             <div class="msg-text markdown-body" v-html="renderMarkdown(msg.content)" />
             <span v-if="msg.isStreaming" class="typing-indicator">
               <span class="dot" />
@@ -453,6 +511,44 @@ const sourceIcon = {
   color: var(--color-text-body);
 }
 
+.scope-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-xl);
+  background: #F7FAFF;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-body);
+  flex-shrink: 0;
+  font-size: var(--font-size-small);
+}
+
+.scope-icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.scope-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scope-clear {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-assist);
+  font-size: var(--font-size-small);
+  cursor: pointer;
+  flex-shrink: 0;
+  text-decoration: underline;
+}
+.scope-clear:hover {
+  color: var(--color-text-body);
+}
+
 /* ==================== Body ==================== */
 .chat-body {
   flex: 1;
@@ -568,6 +664,31 @@ const sourceIcon = {
   border: 1px solid var(--color-border);
   max-width: 100%;
   border-bottom-left-radius: var(--radius-sm);
+}
+
+.answer-mode {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+
+.mode-material {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.mode-general {
+  color: var(--color-warning);
+  background: #FFFBE6;
+}
+
+.mode-web {
+  color: var(--color-success);
+  background: #F0FFF0;
 }
 
 .msg-quote {

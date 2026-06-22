@@ -7,7 +7,7 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PhArrowLeft, PhDownloadSimple, PhFileText, PhWarning } from '@/components/icons'
+import { PhArrowLeft, PhDownloadSimple, PhFileText, PhSparkle, PhWarning } from '@/components/icons'
 import { getMaterial, getPreviewUrl, canPreview } from '@/api/material'
 import type { Material } from '@/api/types'
 
@@ -52,6 +52,18 @@ async function loadMaterial() {
 
 function goBack() {
   router.push('/materials')
+}
+
+function askAboutMaterial() {
+  if (!material.value) return
+  router.push({
+    path: '/home',
+    query: {
+      subjectId: String(material.value.subjectId),
+      materialId: String(material.value.id),
+      materialName: material.value.filename
+    }
+  })
 }
 
 // 文本选中提示：iframe 内的选中文字通过浏览器原生支持复制
@@ -100,6 +112,10 @@ onUnmounted(() => {
       <div v-else class="file-info placeholder">加载中...</div>
 
       <div class="toolbar-right">
+        <button class="ask-btn" type="button" :disabled="!material" @click="askAboutMaterial">
+          <PhSparkle :size="16" />
+          基于此资料提问
+        </button>
         <a class="download-btn" :href="previewUrl || undefined" :download="material?.filename || 'preview.pdf'">
           <PhDownloadSimple :size="16" />
           下载
@@ -237,6 +253,28 @@ onUnmounted(() => {
   background: #4566E6;
 }
 .download-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ask-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card-bg);
+  color: var(--color-primary);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+.ask-btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+.ask-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

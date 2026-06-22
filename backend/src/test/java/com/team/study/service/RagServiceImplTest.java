@@ -1,6 +1,7 @@
 package com.team.study.service;
 
 import com.team.study.dto.request.ChatRequest;
+import com.team.study.dto.request.ChatHistoryMessage;
 import com.team.study.dto.response.ChatResponse;
 import com.team.study.repository.MaterialRepository;
 import com.team.study.repository.SubjectRepository;
@@ -16,9 +17,11 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -51,7 +54,7 @@ class RagServiceImplTest {
         request.setQuestion("这份音频主要讲了什么？");
         when(subjectRepository.existsByIdAndUserId(4L, 7L)).thenReturn(true);
         when(materialRepository.existsByIdAndUserIdAndSubjectId(16L, 7L, 4L)).thenReturn(true);
-        when(documentIngestionService.getMaterialContext(7L, 16L, 8))
+        when(documentIngestionService.getMaterialContext(7L, 16L, "这份音频主要讲了什么？", 8))
                 .thenReturn("信息系统课程介绍了输入、处理、输出以及管理信息系统的基本组成。");
         var requestSpec = chatClient.prompt();
         when(chatClient.prompt().system(anyString()).user(anyString()).call().content())
@@ -62,11 +65,91 @@ class RagServiceImplTest {
 
         ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
         verify(requestSpec).system(systemCaptor.capture());
-        verify(documentIngestionService).getMaterialContext(7L, 16L, 8);
+        verify(documentIngestionService).getMaterialContext(7L, 16L, "这份音频主要讲了什么？", 8);
         assertThat(systemCaptor.getValue()).contains("信息系统课程介绍了输入、处理、输出");
         assertThat(response.getAnswer()).contains("信息系统");
+        assertThat(response.getAnswerMode()).isEqualTo("material");
         assertThat(response.getSources()).hasSize(1);
         assertThat(response.getSources().getFirst().getMaterialId()).isEqualTo(16L);
+    }
+
+    @Test
+    void chatUsesHistoryForRetrievalAndConversationContext() {
+        loginAs(7L);
+        RagServiceImpl service = new RagServiceImpl(
+                chatClient, documentIngestionService, subjectRepository, materialRepository);
+        ChatRequest request = new ChatRequest();
+        request.setSubjectId(4L);
+        request.setQuestion("它有什么优缺点？");
+        request.setHistory(List.of(
+                new ChatHistoryMessage("user", "刚才那页讲的是轮转调度算法"),
+                new ChatHistoryMessage("assistant", "轮转调度按时间片公平分配 CPU")
+        ));
+        when(subjectRepository.existsByIdAndUserId(4L, 7L)).thenReturn(true);
+        when(documentIngestionService.retrieve(7L, 4L, "刚才那页讲的是轮转调度算法\n轮转调度按时间片公平分配 CPU\n它有什么优缺点？", 5))
+                .thenReturn(List.of(new org.springframework.ai.document.Document("轮转调度优点是公平，缺点是时间片过小会增加切换开销。",
+                        java.util.Map.of("source", "os.pdf", "materialId", "11"))));
+        var requestSpec = chatClient.prompt();
+        when(chatClient.prompt().system(anyString()).user(contains("刚才那页讲的是轮转调度算法")).call().content())
+                .thenReturn("轮转调度较公平，但时间片过小会增加上下文切换开销。");
+        clearInvocations(requestSpec);
+
+        ChatResponse response = service.chat(request);
+
+        verify(documentIngestionService).retrieve(7L, 4L,
+                "刚才那页讲的是轮转调度算法\n轮转调度按时间片公平分配 CPU\n它有什么优缺点？", 5);
+        assertThat(response.getAnswer()).contains("轮转调度");
+        assertThat(response.getAnswerMode()).isEqualTo("material");
+    }
+
+    @Test
+    void chatReturnsGeneralAnswerModeWhenNoMaterialContextFound() {
+        loginAs(7L);
+        RagServiceImpl service = new RagServiceImpl(
+                chatClient, documentIngestionService, subjectRepository, materialRepository);
+        ChatRequest request = new ChatRequest();
+        request.setSubjectId(4L);
+        request.setQuestion("量子力学是什么？");
+        when(subjectRepository.existsByIdAndUserId(4L, 7L)).thenReturn(true);
+        when(documentIngestionService.retrieve(7L, 4L, "量子力学是什么？", 5)).thenReturn(List.of());
+        var requestSpec = chatClient.prompt();
+        when(chatClient.prompt().system(anyString()).user(anyString()).call().content())
+                .thenReturn("没有在资料中找到可靠上下文。量子力学是研究微观粒子的理论。");
+        clearInvocations(requestSpec);
+
+        ChatResponse response = service.chat(request);
+
+        ArgumentCaptor<String> systemCaptor = ArgumentCaptor.forClass(String.class);
+        verify(requestSpec).system(systemCaptor.capture());
+        assertThat(systemCaptor.getValue()).contains("没有找到可靠的资料上下文");
+        assertThat(response.getAnswerMode()).isEqualTo("general");
+        assertThat(response.getSources()).isEmpty();
+    }
+
+    @Test
+    void chatReturnsGeneralAnswerModeWhenRetrievedScoreIsTooLow() {
+        loginAs(7L);
+        RagServiceImpl service = new RagServiceImpl(
+                chatClient, documentIngestionService, subjectRepository, materialRepository);
+        ChatRequest request = new ChatRequest();
+        request.setSubjectId(4L);
+        request.setQuestion("请总结并发控制和 CPU 分配的核心知识点");
+        org.springframework.ai.document.Document weakMatch = new org.springframework.ai.document.Document(
+                "这段资料只零散提到了操作系统。",
+                java.util.Map.of("source", "os.pdf", "materialId", "11", "score", 0.05)
+        );
+        when(subjectRepository.existsByIdAndUserId(4L, 7L)).thenReturn(true);
+        when(documentIngestionService.retrieve(7L, 4L, "请总结并发控制和 CPU 分配的核心知识点", 5))
+                .thenReturn(List.of(weakMatch));
+        var requestSpec = chatClient.prompt();
+        when(chatClient.prompt().system(anyString()).user(anyString()).call().content())
+                .thenReturn("没有在资料中找到可靠上下文。并发控制和 CPU 分配分别对应同步与调度相关知识。");
+        clearInvocations(requestSpec);
+
+        ChatResponse response = service.chat(request);
+
+        assertThat(response.getAnswerMode()).isEqualTo("general");
+        assertThat(response.getSources()).isEmpty();
     }
 
     private void loginAs(Long userId) {

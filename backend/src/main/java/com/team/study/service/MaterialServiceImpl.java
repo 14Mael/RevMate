@@ -148,6 +148,20 @@ public class MaterialServiceImpl implements MaterialService {
     }
 
     @Override
+    public int reindex(Long id) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        if (userId == null) {
+            throw new IllegalArgumentException("未登录");
+        }
+        Material material = materialRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("资料不存在"));
+        if (!material.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权访问该资料");
+        }
+        return documentIngestionService.reindexMaterial(userId, material.getId());
+    }
+
+    @Override
     public org.springframework.core.io.Resource getPreviewResource(Long id) {
         Long userId = SecurityUtil.getCurrentUserId();
         if (userId == null) {

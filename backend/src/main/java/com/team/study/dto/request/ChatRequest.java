@@ -4,6 +4,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class ChatRequest {
     @NotNull(message = "subjectId 不能为空")
@@ -13,4 +15,6 @@ public class ChatRequest {
 
     @NotBlank(message = "问题不能为空")
     private String question;
+
+    private List<ChatHistoryMessage> history;
 }

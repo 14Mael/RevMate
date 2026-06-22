@@ -40,6 +40,12 @@ public class MaterialController {
         return Result.success();
     }
 
+    @PostMapping("/{id}/reindex")
+    public Result<Integer> reindex(@PathVariable Long id) {
+        int updated = materialService.reindex(id);
+        return Result.success(updated);
+    }
+
     @GetMapping("/{id}/preview")
     public ResponseEntity<Resource> preview(@PathVariable Long id) {
         Resource resource = materialService.getPreviewResource(id);

@@ -16,6 +16,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * RAG 问答服务实现
@@ -39,6 +40,7 @@ public class RagServiceImpl implements RagService {
     private static final int TOP_K = 5;
     private static final int MIN_HITS = 1;
     private static final int MATERIAL_CONTEXT_CHUNKS = 8;
+    private static final double MIN_MATERIAL_SCORE = 0.12;
 
     @Override
     public ChatResponse chat(ChatRequest request) {
@@ -47,17 +49,19 @@ public class RagServiceImpl implements RagService {
         String question = request.getQuestion();
         Long subjectId = request.getSubjectId();
         List<SourceItem> sources = new ArrayList<>();
+        String retrievalQuery = buildRetrievalQuery(request);
+        String userPrompt = buildUserPrompt(request);
 
         Long materialId = request.getMaterialId();
         log.info("RAG 请求: userId={}, subjectId={}, materialId={}", userId, subjectId, materialId);
         if (materialId != null) {
             validateMaterial(userId, subjectId, materialId);
-            String context = documentIngestionService.getMaterialContext(userId, materialId, MATERIAL_CONTEXT_CHUNKS);
+            String context = documentIngestionService.getMaterialContext(userId, materialId, retrievalQuery, MATERIAL_CONTEXT_CHUNKS);
             int contextLength = context == null ? 0 : context.length();
             log.info("指定资料上下文: materialId={}, 上下文长度={}", materialId, contextLength);
             if (context == null || context.isBlank()) {
                 log.warn("指定资料无可用切片，回落到无资料应答: materialId={}", materialId);
-                return answerNoData(question);
+                return answerNoData(userPrompt);
             }
             sources.add(SourceItem.builder()
                     .type("material")
@@ -65,18 +69,18 @@ public class RagServiceImpl implements RagService {
                     .snippet(truncate(context, 150))
                     .materialId(materialId)
                     .build());
-            return answerFromContext(question, context, sources);
+            return answerFromContext(userPrompt, context, sources);
         }
 
         // 1. 检索用户在当前学科下的资料
-        List<Document> chunks = documentIngestionService.retrieve(userId, subjectId, question, TOP_K);
+        List<Document> chunks = documentIngestionService.retrieve(userId, subjectId, retrievalQuery, TOP_K);
         log.info("未指定资料，走关键词检索: subjectId={}, 命中切片数={}", subjectId, chunks == null ? 0 : chunks.size());
 
-        if (chunks != null && chunks.size() >= MIN_HITS) {
-            return answerFromMaterials(question, chunks, sources);
+        if (chunks != null && chunks.size() >= MIN_HITS && hasReliableMaterialScore(chunks)) {
+            return answerFromMaterials(userPrompt, chunks, sources);
         } else {
             log.warn("关键词检索未命中，回落到无资料应答: subjectId={}", subjectId);
-            return answerNoData(question);
+            return answerNoData(userPrompt);
         }
     }
 
@@ -84,28 +88,29 @@ public class RagServiceImpl implements RagService {
     public Flux<String> chatStream(ChatRequest request) {
         Long userId = validateUserAndSubject(request);
 
-        String question = request.getQuestion();
         Long subjectId = request.getSubjectId();
         Long materialId = request.getMaterialId();
+        String retrievalQuery = buildRetrievalQuery(request);
+        String userPrompt = buildUserPrompt(request);
         log.info("RAG 流式请求: userId={}, subjectId={}, materialId={}", userId, subjectId, materialId);
 
         if (materialId != null) {
             validateMaterial(userId, subjectId, materialId);
-            String context = documentIngestionService.getMaterialContext(userId, materialId, MATERIAL_CONTEXT_CHUNKS);
+            String context = documentIngestionService.getMaterialContext(userId, materialId, retrievalQuery, MATERIAL_CONTEXT_CHUNKS);
             if (context == null || context.isBlank()) {
                 log.warn("指定资料无可用切片，流式回落到无资料应答: materialId={}", materialId);
-                return answerNoDataStream(question);
+                return answerNoDataStream(userPrompt);
             }
-            return answerFromContextStream(question, context);
+            return answerFromContextStream(userPrompt, context);
         }
 
-        List<Document> chunks = documentIngestionService.retrieve(userId, subjectId, question, TOP_K);
+        List<Document> chunks = documentIngestionService.retrieve(userId, subjectId, retrievalQuery, TOP_K);
         log.info("未指定资料，流式关键词检索: subjectId={}, 命中切片数={}", subjectId, chunks == null ? 0 : chunks.size());
-        if (chunks != null && chunks.size() >= MIN_HITS) {
-            return answerFromMaterialsStream(question, chunks);
+        if (chunks != null && chunks.size() >= MIN_HITS && hasReliableMaterialScore(chunks)) {
+            return answerFromMaterialsStream(userPrompt, chunks);
         }
         log.warn("关键词检索未命中，流式回落到无资料应答: subjectId={}", subjectId);
-        return answerNoDataStream(question);
+        return answerNoDataStream(userPrompt);
     }
 
     private Long validateUserAndSubject(ChatRequest request) {
@@ -158,7 +163,7 @@ public class RagServiceImpl implements RagService {
                 .call()
                 .content();
 
-        return new ChatResponse(answer != null ? answer : "", sources);
+        return new ChatResponse(answer != null ? answer : "", sources, "material");
     }
 
     private ChatResponse answerFromContext(String question, String context, List<SourceItem> sources) {
@@ -174,17 +179,17 @@ public class RagServiceImpl implements RagService {
                 .call()
                 .content();
 
-        return new ChatResponse(answer != null ? answer : "", sources);
+        return new ChatResponse(answer != null ? answer : "", sources, "material");
     }
 
     private ChatResponse answerNoData(String question) {
         String answer = chatClient.prompt()
-                .system("你是一个智能助手。用户的问题目前没有相关的复习资料，请根据你的知识回答。")
+                .system("你是一个智能助手。没有找到可靠的资料上下文，请明确说明这不是基于上传资料的回答，再根据你的通用知识回答。")
                 .user(question)
                 .call()
                 .content();
 
-        return new ChatResponse(answer != null ? answer : "", List.of());
+        return new ChatResponse(answer != null ? answer : "", List.of(), "general");
     }
 
     private Flux<String> answerFromMaterialsStream(String question, List<Document> chunks) {
@@ -225,5 +230,58 @@ public class RagServiceImpl implements RagService {
     private String truncate(String text, int maxLen) {
         if (text == null) return "";
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
+    }
+
+    private String buildRetrievalQuery(ChatRequest request) {
+        List<String> parts = new ArrayList<>();
+        if (request.getHistory() != null) {
+            request.getHistory().stream()
+                    .filter(message -> message != null && message.getContent() != null && !message.getContent().isBlank())
+                    .skip(Math.max(0, request.getHistory().size() - 6))
+                    .map(message -> message.getContent().trim())
+                    .forEach(parts::add);
+        }
+        parts.add(request.getQuestion().trim());
+        return String.join("\n", parts);
+    }
+
+    private String buildUserPrompt(ChatRequest request) {
+        if (request.getHistory() == null || request.getHistory().isEmpty()) {
+            return request.getQuestion();
+        }
+        StringBuilder builder = new StringBuilder("最近对话：\n");
+        request.getHistory().stream()
+                .filter(message -> message != null && message.getContent() != null && !message.getContent().isBlank())
+                .skip(Math.max(0, request.getHistory().size() - 6))
+                .forEach(message -> builder
+                        .append(normalizeRole(message.getRole()))
+                        .append("：")
+                        .append(message.getContent().trim())
+                        .append('\n'));
+        builder.append("\n本轮问题：").append(request.getQuestion());
+        return builder.toString();
+    }
+
+    private String normalizeRole(String role) {
+        if (role == null) return "用户";
+        return switch (role.toLowerCase(Locale.ROOT)) {
+            case "assistant" -> "助手";
+            case "user" -> "用户";
+            default -> "消息";
+        };
+    }
+
+    private boolean hasReliableMaterialScore(List<Document> chunks) {
+        double bestScore = chunks.stream()
+                .mapToDouble(chunk -> {
+                    Object score = chunk.getMetadata().get("score");
+                    if (score instanceof Number number) {
+                        return number.doubleValue();
+                    }
+                    return 1.0;
+                })
+                .max()
+                .orElse(0.0);
+        return bestScore >= MIN_MATERIAL_SCORE;
     }
 }

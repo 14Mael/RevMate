@@ -104,6 +104,37 @@ class MaterialServiceImplTest {
     }
 
     @Test
+    void reindexDelegatesForOwnedMaterial() throws Exception {
+        loginAs(5L);
+        Path file = uploadRoot.resolve("5").resolve("abc_doc.txt");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "content");
+        Material m = storedMaterial(10L, 5L, file);
+        when(materialRepository.findById(10L)).thenReturn(Optional.of(m));
+        when(documentIngestionService.reindexMaterial(5L, 10L)).thenReturn(3);
+
+        int updated = materialService.reindex(10L);
+
+        assertThat(updated).isEqualTo(3);
+        verify(documentIngestionService).reindexMaterial(5L, 10L);
+    }
+
+    @Test
+    void reindexRejectsOtherUsersMaterial() throws Exception {
+        loginAs(5L);
+        Path file = uploadRoot.resolve("9").resolve("abc_doc.txt");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "content");
+        Material m = storedMaterial(11L, 9L, file);
+        when(materialRepository.findById(11L)).thenReturn(Optional.of(m));
+
+        assertThatThrownBy(() -> materialService.reindex(11L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("无权访问该资料");
+        verify(documentIngestionService, never()).reindexMaterial(5L, 11L);
+    }
+
+    @Test
     void mimeTypeToContentType_mapsPptAndExcel() {
         assertEquals("ppt", ReflectionTestUtils.invokeMethod(
                 materialService, "mimeTypeToContentType",

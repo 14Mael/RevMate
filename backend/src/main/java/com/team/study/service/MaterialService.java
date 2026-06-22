@@ -11,4 +11,5 @@ public interface MaterialService {
     List<MaterialResponse> list(Long subjectId);
     void delete(Long id);
     Resource getPreviewResource(Long id);
+    int reindex(Long id);
 }

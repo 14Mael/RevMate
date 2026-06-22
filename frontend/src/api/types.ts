@@ -63,6 +63,12 @@ export interface Material {
 /* ========== 问答 ========== */
 
 export type SourceType = 'material' | 'web'
+export type AnswerMode = 'material' | 'general' | 'web'
+
+export interface ChatHistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
 
 export interface Source {
   type: SourceType
@@ -77,11 +83,13 @@ export interface ChatRequest {
   subjectId: number
   materialId?: number
   question: string
+  history?: ChatHistoryMessage[]
 }
 
 export interface ChatResponse {
   answer: string
   sources: Source[]
+  answerMode: AnswerMode
 }
 
 /* ========== 出题 ========== */

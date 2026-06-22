@@ -37,6 +37,17 @@ public class MaterialChunk {
     @Column(nullable = false, length = 4000)
     private String text;
 
+    @Lob
+    @Column(name = "embedding", columnDefinition = "LONGTEXT")
+    private String embedding;
+
+    @Column(name = "embedding_model", length = 100)
+    private String embeddingModel;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "embedding_status", nullable = false, length = 20)
+    private EmbeddingStatus embeddingStatus = EmbeddingStatus.PENDING;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

@@ -12,4 +12,9 @@ import java.util.List;
 public class ChatResponse {
     private String answer;
     private List<SourceItem> sources;
+    private String answerMode;
+
+    public ChatResponse(String answer, List<SourceItem> sources) {
+        this(answer, sources, "material");
+    }
 }

@@ -29,17 +29,22 @@ spring:
         options:
           model: ${OPENAI_MODEL:qwen3.5-omni-plus}
       embedding:
-        enabled: false
+        enabled: ${EMBEDDING_ENABLED:false}
+        options:
+          model: ${EMBEDDING_MODEL:text-embedding-v4}
+
+app:
+  rag:
+    embedding:
+      enabled: ${EMBEDDING_ENABLED:false}
+      model: ${EMBEDDING_MODEL:text-embedding-v4}
+  upload:
+    dir: uploads
 
 # JWT
 jwt:
   secret: ${JWT_SECRET}
   expiration: 86400000  # 24 hours
-
-# 文件上传存储路径
-app:
-  upload:
-    dir: uploads
 
 dashscope:
   api-key: ${DASHSCOPE_API_KEY:${OPENAI_API_KEY:}}

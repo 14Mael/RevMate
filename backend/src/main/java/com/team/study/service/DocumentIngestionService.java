@@ -45,6 +45,15 @@ public interface DocumentIngestionService {
     String getMaterialContext(Long userId, Long materialId, int maxChunks);
 
     /**
+     * 按资料和当前问题获取代表性切片上下文（供资料问答使用）
+     * @param userId     用户 ID
+     * @param materialId 资料 ID
+     * @param query      当前问题和最近历史压缩后的检索文本
+     * @param maxChunks  最大切片数
+     */
+    String getMaterialContext(Long userId, Long materialId, String query, int maxChunks);
+
+    /**
      * 按学科获取代表性切片上下文（供整学科出题使用）
      * @param userId 用户 ID
      * @param subjectId 学科 ID
@@ -57,4 +66,12 @@ public interface DocumentIngestionService {
      * @param materialId 资料 ID
      */
     void removeByMaterial(Long materialId);
+
+    /**
+     * 为指定资料中缺失或失败的切片补齐 embedding
+     * @param userId 用户 ID（隔离）
+     * @param materialId 资料 ID
+     * @return 成功更新的切片数
+     */
+    int reindexMaterial(Long userId, Long materialId);
 }
