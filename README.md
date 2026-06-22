@@ -1,8 +1,8 @@
 # RevMate · 复习资料智能学习助手
 
-基于 **Spring Boot + Spring AI** 的复习资料智能学习平台：上传自己的复习资料（文本/PDF/Word/PPT/Excel/图片），系统将资料提取为文本并切片入库，支持基于资料的 **RAG 问答（带原文出处）**、**AI 自动出题**，以及 Office 文档转 PDF 预览。
+基于 **Spring Boot + Spring AI** 的复习资料智能学习后端：上传自己的复习资料（文本/PDF/Word/PPT/Excel/图片），系统将资料提取为文本并切片入库，支持基于资料的 **RAG 问答（带原文出处）**、**AI 自动出题**，以及 Office 文档转 PDF 预览。
 
-> 课程设计作业 · 4 人协作 · 详见 [设计文档](docs/设计文档.md)。
+> 课程设计作业 · 后端服务。
 
 ## 核心功能
 
@@ -16,23 +16,13 @@
 - 后端：Spring Boot 3.4.x + JDK 21 + Spring AI 1.0.0
 - 模型接入：Spring AI OpenAI 兼容接口，可切换 OpenAI / DeepSeek / DashScope 兼容模式
 - 数据：MySQL 8，本地文件存储上传资料与预览 PDF
-- 前端：Vue3 + Element Plus
 
 ## 目录结构
 
 ```
 RevMate/
 ├── README.md          # 本文件：项目简介与快速开始
-├── backend/           # Spring Boot 后端
-├── frontend/          # Vue3 前端
-└── docs/
-    ├── 设计文档.md       # 完整设计文档
-    └── plans/          # 各成员实现计划
-        ├── 00-项目骨架与接口契约.md
-        ├── 01-成员1-用户与资料管理.md
-        ├── 02-成员2-RAG核心与提取器.md
-        ├── 03-成员3-出题与Prompt工程.md
-        └── 04-成员4-前端.md
+└── backend/           # Spring Boot 后端
 ```
 
 ## 团队分工
@@ -42,14 +32,13 @@ RevMate/
 | 1 | 用户与资料管理（后端） | `feat/auth` |
 | 2 | RAG 核心与提取器（后端） | `feat/rag` |
 | 3 | 出题与 Prompt 工程（后端） | `feat/quiz` |
-| 4 | 前端（Vue3） | `feat/frontend` |
 
 ## 协作约定
 
 - `main` 始终保持可运行，不直接在 main 上开发
 - 每人在自己分支开发，通过 Pull Request 合并到 main
 - 开工前先 `git pull origin main` 同步主干，小步提交
-- 统一环境：JDK 21 / Maven Wrapper / Node 20 / MySQL 8 / LibreOffice
+- 统一环境：JDK 21 / Maven Wrapper / MySQL 8 / LibreOffice
 - API Key、数据库密码使用环境变量或本地配置，**不提交明文密钥**
 
 ## 快速开始
@@ -59,7 +48,6 @@ RevMate/
 - JDK 21
 - MySQL 8
 - LibreOffice（用于 Word / PPT / Excel 转 PDF 预览）
-- Node.js 20（运行前端时需要）
 
 ### 2. 配置模型环境变量
 
@@ -75,6 +63,19 @@ $env:JWT_SECRET="至少 32 个字符的随机密钥"
 ```
 
 如果切换到 DeepSeek / OpenAI / 其他兼容平台，只需要改 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `OPENAI_MODEL`。
+
+音频资料转写使用 DashScope Paraformer 录音文件识别。该接口需要一个可由 DashScope 服务端访问的音频 URL，因此本地上传的音频会先上传到阿里云 OSS，再生成临时签名 URL 交给 Paraformer。若要上传音频资料，还需要配置：
+
+```powershell
+$env:DASHSCOPE_API_KEY="你的 DashScope API Key"
+$env:DASHSCOPE_ASR_MODEL="paraformer-v2"
+$env:ALIYUN_OSS_ENDPOINT="oss-cn-xxx.aliyuncs.com"
+$env:ALIYUN_OSS_BUCKET="你的 OSS bucket"
+$env:ALIYUN_ACCESS_KEY_ID="你的 AccessKeyId"
+$env:ALIYUN_ACCESS_KEY_SECRET="你的 AccessKeySecret"
+```
+
+`DASHSCOPE_API_KEY` 默认会回退到 `OPENAI_API_KEY`，但该 Key 必须已开通 DashScope / 百炼录音文件识别服务。OSS 配置缺失时，普通文本、PDF、Office、图片资料不受影响；音频资料处理会失败并在资料列表中显示具体缺失项。
 
 资料处理状态和预览状态是分开的：`status=READY` 表示资料文本已经可用于问答/出题，`previewStatus=READY` 才表示 PDF 预览可用。若 Word / PPT / Excel 转 PDF 失败，资料仍可用于问答，但接口会返回 `previewStatus=FAILED` 和失败提示，通常需要检查 LibreOffice 是否安装或文件是否损坏。
 

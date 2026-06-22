@@ -1,0 +1,71 @@
+/* =========================================================
+ * RevMate 全局样式
+ * 引入顺序：variables.css → global.css → element-overrides.scss
+ * ========================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  color: var(--color-text-body);
+  background-color: var(--color-page-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-default);
+}
+
+a:hover {
+  color: #4566e6;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--color-text-title);
+  line-height: var(--line-height-heading);
+  font-weight: 600;
+}
+
+h1 { font-size: var(--font-size-h1); }
+h2 { font-size: var(--font-size-h2); }
+h3 { font-size: var(--font-size-h3); }
+
+/* 滚动条样式（Webkit） */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(60, 60, 92, 0.18);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 60, 92, 0.32);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

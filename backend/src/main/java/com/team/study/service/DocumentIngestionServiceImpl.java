@@ -192,6 +192,17 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
         StringBuilder current = new StringBuilder();
 
         for (String p : paragraphs) {
+            if (p.length() > maxLen) {
+                if (current.length() > 0) {
+                    result.add(current.toString().trim());
+                    current = new StringBuilder();
+                }
+                for (int start = 0; start < p.length(); start += maxLen) {
+                    int end = Math.min(start + maxLen, p.length());
+                    result.add(p.substring(start, end));
+                }
+                continue;
+            }
             if (current.length() + p.length() > maxLen && current.length() > 0) {
                 result.add(current.toString().trim());
                 current = new StringBuilder();

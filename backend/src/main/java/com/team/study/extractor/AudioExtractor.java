@@ -1,23 +1,23 @@
 package com.team.study.extractor;
 
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.content.Media;
+import com.team.study.service.OssAudioStorageService;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
-import org.springframework.util.MimeType;
+
+import java.nio.file.Path;
 
 /**
- * 音频提取器 — 调用多模态模型将语音资料转写为文字稿。
+ * 音频提取器 — 上传音频并调用专门的 ASR 服务转写为文字稿。
  */
 @Component
 public class AudioExtractor implements ContentExtractor {
 
-    private final ChatClient audioChatClient;
+    private final OssAudioStorageService ossAudioStorageService;
+    private final DashScopeAsrClient dashScopeAsrClient;
 
-    public AudioExtractor(ChatModel chatModel) {
-        this.audioChatClient = chatModel == null ? null : ChatClient.builder(chatModel).build();
+    public AudioExtractor(OssAudioStorageService ossAudioStorageService, DashScopeAsrClient dashScopeAsrClient) {
+        this.ossAudioStorageService = ossAudioStorageService;
+        this.dashScopeAsrClient = dashScopeAsrClient;
     }
 
     @Override
@@ -27,25 +27,14 @@ public class AudioExtractor implements ContentExtractor {
 
     @Override
     public String extract(Resource file) {
-        if (audioChatClient == null) {
-            throw new IllegalStateException("语音识别模型未配置");
-        }
         if (file == null) {
             throw new IllegalArgumentException("音频文件不能为空");
         }
 
         try {
-            MimeType mimeType = MimeType.valueOf(resolveMimeType(file.getFilename()));
-            Media media = new Media(mimeType, file);
-            UserMessage message = UserMessage.builder()
-                    .text("请将这段音频完整转写为中文文字稿。如果音频中包含英文或术语，请保留原文。只输出文字稿，不要添加解释。")
-                    .media(media)
-                    .build();
-
-            String result = audioChatClient.prompt()
-                    .messages(message)
-                    .call()
-                    .content();
+            Path filePath = file.getFile().toPath();
+            String audioUrl = ossAudioStorageService.uploadAndCreateSignedUrl(filePath, file.getFilename());
+            String result = dashScopeAsrClient.transcribe(audioUrl);
             if (result == null || result.isBlank()) {
                 throw new IllegalStateException("语音识别结果为空");
             }
@@ -53,19 +42,5 @@ public class AudioExtractor implements ContentExtractor {
         } catch (Exception e) {
             throw new RuntimeException("语音识别失败: " + file.getFilename(), e);
         }
-    }
-
-    private String resolveMimeType(String filename) {
-        if (filename == null || !filename.contains(".")) {
-            return "audio/mpeg";
-        }
-        String ext = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
-        return switch (ext) {
-            case "wav" -> "audio/wav";
-            case "m4a" -> "audio/mp4";
-            case "webm" -> "audio/webm";
-            case "ogg" -> "audio/ogg";
-            default -> "audio/mpeg";
-        };
     }
 }

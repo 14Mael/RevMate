@@ -9,6 +9,8 @@ public class ChatRequest {
     @NotNull(message = "subjectId 不能为空")
     private Long subjectId;
 
+    private Long materialId;
+
     @NotBlank(message = "问题不能为空")
     private String question;
 }

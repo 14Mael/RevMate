@@ -82,7 +82,7 @@ class FileProcessingServiceTest {
     }
 
     @Test
-    void audioTranscriptionFailureMarksMaterialFailed() throws Exception {
+    void audioTranscriptionFailureMarksMaterialFailedWithRootCauseMessage() throws Exception {
         MaterialRepository materialRepository = mock(MaterialRepository.class);
         ExtractorRouter extractorRouter = mock(ExtractorRouter.class);
         DocumentIngestionService documentIngestionService = mock(DocumentIngestionService.class);
@@ -107,6 +107,7 @@ class FileProcessingServiceTest {
         verify(materialRepository).save(material);
         assertThat(material.getStatus()).isEqualTo(Material.Status.FAILED);
         assertThat(material.getPreviewStatus()).isEqualTo(Material.PreviewStatus.FAILED);
-        assertThat(material.getPreviewMessage()).isEqualTo("资料处理失败，未生成预览");
+        assertThat(material.getPreviewMessage()).contains("资料处理失败");
+        assertThat(material.getPreviewMessage()).contains("语音识别失败");
     }
 }

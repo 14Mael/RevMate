@@ -92,6 +92,27 @@ class DocumentIngestionServiceImplTest {
         assertThat(context).contains("第一段").contains("第二段");
     }
 
+    @Test
+    void ingestSplitsLongParagraphsIntoBoundedChunks() {
+        MaterialChunkRepository repository = mock(MaterialChunkRepository.class);
+        MaterialRepository materialRepository = mock(MaterialRepository.class);
+        List<MaterialChunk> persisted = new ArrayList<>();
+        doAnswer(invocation -> {
+            persisted.addAll(invocation.getArgument(0));
+            return persisted;
+        }).when(repository).saveAll(anyList());
+        String longTranscript = "软件测试".repeat(900);
+
+        DocumentIngestionServiceImpl service = new DocumentIngestionServiceImpl(repository, materialRepository);
+        service.ingest(7L, 101L, "lecture.m4a", longTranscript);
+
+        assertThat(persisted).hasSizeGreaterThan(1);
+        assertThat(persisted)
+                .allSatisfy(chunk -> assertThat(chunk.getText()).hasSizeLessThanOrEqualTo(500));
+        assertThat(persisted.stream().map(MaterialChunk::getText).reduce("", String::concat))
+                .isEqualTo(longTranscript);
+    }
+
     private MaterialChunk chunk(Long id, Long userId, Long materialId, int index, String source, String text) {
         MaterialChunk chunk = new MaterialChunk();
         chunk.setId(id);

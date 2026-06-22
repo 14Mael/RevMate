@@ -21,6 +21,7 @@ import java.nio.file.Path;
 public class FileProcessingService {
 
     private static final Logger log = LoggerFactory.getLogger(FileProcessingService.class);
+    private static final int MAX_PREVIEW_MESSAGE_LENGTH = 255;
 
     private final MaterialRepository materialRepository;
     private final ExtractorRouter extractorRouter;
@@ -57,10 +58,37 @@ public class FileProcessingService {
             materialRepository.findById(materialId).ifPresent(material -> {
                 material.setStatus(Material.Status.FAILED);
                 material.setPreviewStatus(Material.PreviewStatus.FAILED);
-                material.setPreviewMessage("资料处理失败，未生成预览");
+                material.setPreviewMessage(buildFailureMessage(e));
                 materialRepository.save(material);
             });
         }
+    }
+
+    private String buildFailureMessage(Exception e) {
+        String detail = deepestMessage(e);
+        String message = detail == null || detail.isBlank()
+                ? "资料处理失败，未生成预览"
+                : "资料处理失败: " + detail;
+        return truncate(message, MAX_PREVIEW_MESSAGE_LENGTH);
+    }
+
+    private String deepestMessage(Throwable throwable) {
+        Throwable current = throwable;
+        String message = null;
+        while (current != null) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                message = current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return message;
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength - 3) + "...";
     }
 
     /**

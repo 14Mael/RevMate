@@ -41,6 +41,20 @@ app:
   upload:
     dir: uploads
 
+dashscope:
+  api-key: ${DASHSCOPE_API_KEY:${OPENAI_API_KEY:}}
+  asr-model: ${DASHSCOPE_ASR_MODEL:paraformer-v2}
+  poll-interval: ${DASHSCOPE_ASR_POLL_INTERVAL:PT2S}
+  max-poll-attempts: ${DASHSCOPE_ASR_MAX_POLL_ATTEMPTS:300}
+
+aliyun:
+  oss:
+    endpoint: ${ALIYUN_OSS_ENDPOINT:}
+    bucket: ${ALIYUN_OSS_BUCKET:}
+    access-key-id: ${ALIYUN_ACCESS_KEY_ID:}
+    access-key-secret: ${ALIYUN_ACCESS_KEY_SECRET:}
+    signed-url-expire: ${ALIYUN_OSS_SIGNED_URL_EXPIRE:PT1H}
+
 # JODConverter + LibreOffice
 jodconverter:
   local:

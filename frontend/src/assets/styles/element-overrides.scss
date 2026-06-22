@@ -1,0 +1,36 @@
+/* =========================================================
+ * Element Plus 主题覆盖
+ * 把 Element Plus 的主色统一到 RevMate 的暖靛蓝 #5B7FFF。
+ * 其他组件级覆盖按需追加。
+ * ========================================================= */
+
+:root {
+  /* 主色及其衍生色（Element Plus 9 级配色） */
+  --el-color-primary: #5B7FFF;
+  --el-color-primary-light-3: #8FA0FF;
+  --el-color-primary-light-5: #B0BCFF;
+  --el-color-primary-light-7: #D1D9FF;
+  --el-color-primary-light-8: #DEE4FF;
+  --el-color-primary-light-9: #EBEFFF;
+  --el-color-primary-dark-2: #4566E6;
+
+  /* 文字 */
+  --el-text-color-primary: #1A1A2E;
+  --el-text-color-regular: #3D3D5C;
+  --el-text-color-secondary: #8C8C9A;
+  --el-text-color-placeholder: #BFBFC7;
+
+  /* 边框 */
+  --el-border-color: #E4E4EB;
+  --el-border-color-light: #E4E4EB;
+  --el-border-color-lighter: #EFEFF4;
+
+  /* 背景 */
+  --el-bg-color: #FFFFFF;
+  --el-bg-color-page: #F5F5FA;
+
+  /* 圆角统一到设计 token */
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 9999px;
+}

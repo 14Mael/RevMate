@@ -3,6 +3,7 @@ package com.team.study.service;
 import com.team.study.dto.request.ChatRequest;
 import com.team.study.dto.response.ChatResponse;
 import com.team.study.dto.response.SourceItem;
+import com.team.study.repository.MaterialRepository;
 import com.team.study.repository.SubjectRepository;
 import com.team.study.security.SecurityUtil;
 import lombok.RequiredArgsConstructor;
@@ -32,9 +33,11 @@ public class RagServiceImpl implements RagService {
     private final ChatClient chatClient;
     private final DocumentIngestionService documentIngestionService;
     private final SubjectRepository subjectRepository;
+    private final MaterialRepository materialRepository;
 
     private static final int TOP_K = 5;
     private static final int MIN_HITS = 1;
+    private static final int MATERIAL_CONTEXT_CHUNKS = 8;
 
     @Override
     public ChatResponse chat(ChatRequest request) {
@@ -50,12 +53,36 @@ public class RagServiceImpl implements RagService {
         }
         List<SourceItem> sources = new ArrayList<>();
 
+        Long materialId = request.getMaterialId();
+        log.info("RAG 请求: userId={}, subjectId={}, materialId={}", userId, subjectId, materialId);
+        if (materialId != null) {
+            if (!materialRepository.existsByIdAndUserIdAndSubjectId(materialId, userId, subjectId)) {
+                throw new IllegalArgumentException("资料不存在或不属于该学科");
+            }
+            String context = documentIngestionService.getMaterialContext(userId, materialId, MATERIAL_CONTEXT_CHUNKS);
+            int contextLength = context == null ? 0 : context.length();
+            log.info("指定资料上下文: materialId={}, 上下文长度={}", materialId, contextLength);
+            if (context == null || context.isBlank()) {
+                log.warn("指定资料无可用切片，回落到无资料应答: materialId={}", materialId);
+                return answerNoData(question);
+            }
+            sources.add(SourceItem.builder()
+                    .type("material")
+                    .title("当前选中资料")
+                    .snippet(truncate(context, 150))
+                    .materialId(materialId)
+                    .build());
+            return answerFromContext(question, context, sources);
+        }
+
         // 1. 检索用户在当前学科下的资料
         List<Document> chunks = documentIngestionService.retrieve(userId, subjectId, question, TOP_K);
+        log.info("未指定资料，走关键词检索: subjectId={}, 命中切片数={}", subjectId, chunks == null ? 0 : chunks.size());
 
         if (chunks != null && chunks.size() >= MIN_HITS) {
             return answerFromMaterials(question, chunks, sources);
         } else {
+            log.warn("关键词检索未命中，回落到无资料应答: subjectId={}", subjectId);
             return answerNoData(question);
         }
     }
@@ -86,6 +113,22 @@ public class RagServiceImpl implements RagService {
                         参考资料：
                         %s
                         """.formatted(contextBuilder.toString()))
+                .user(question)
+                .call()
+                .content();
+
+        return new ChatResponse(answer != null ? answer : "", sources);
+    }
+
+    private ChatResponse answerFromContext(String question, String context, List<SourceItem> sources) {
+        String answer = chatClient.prompt()
+                .system("""
+                        你是一个复习资料智能助手。请基于以下参考资料回答用户的问题。
+                        如果参考资料中有相关内容，请优先使用资料中的信息。
+
+                        参考资料：
+                        %s
+                        """.formatted(context))
                 .user(question)
                 .call()
                 .content();
