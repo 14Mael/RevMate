@@ -9,7 +9,7 @@ import DOMPurify from 'dompurify'
 const md = new MarkdownIt({
   html: false, // 不解析原始 HTML 标签，杜绝注入
   linkify: true, // 自动识别裸链接
-  breaks: true // 单个换行也转成 <br>，贴合聊天观感
+  breaks: false // 单换行不转 <br>，遵循标准 Markdown，避免 AI 输出空行叠加成大间距
 })
 
 export function renderMarkdown(text: string): string {

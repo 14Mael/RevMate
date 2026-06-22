@@ -440,6 +440,16 @@ const sourceIcon: Record<string, typeof PhBookOpen> = {
   margin-bottom: 2px;
 }
 
+/* 松散列表项内的 <p> 不额外撑高，避免间距过大 */
+.markdown-body :deep(li > p) {
+  margin: 0;
+}
+
+.markdown-body :deep(li > ul),
+.markdown-body :deep(li > ol) {
+  margin: 2px 0 0;
+}
+
 /* ==================== Sources ==================== */
 .sources-section {
   margin-top: var(--space-sm);
