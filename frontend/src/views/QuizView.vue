@@ -9,10 +9,12 @@ import { ElMessage } from 'element-plus'
 import { generateQuiz } from '@/api/quiz'
 import { listMaterials } from '@/api/material'
 import { listSubjects } from '@/api/subject'
+import { saveWrongQuestion, saveWrongQuestionsBatch } from '@/api/wrongQuestion'
 import { PhArrowLeft, PhCheckSquare, PhSparkle, PhWarning } from '@/components/icons'
-import type { Material, Question, QuizType, Subject } from '@/api/types'
+import type { Material, Question, QuizType, Subject, WrongQuestionSaveRequest } from '@/api/types'
 
 type Stage = 'config' | 'quiz' | 'review'
+type CollectableType = Exclude<QuizType, 'qa'>
 
 /* ==================== 状态 ==================== */
 
@@ -49,6 +51,11 @@ const totalCount = computed(() => questions.value.length)
 const availableMaterials = computed(() => {
   if (!selectedSubjectId.value) return materials.value
   return materials.value.filter((m) => m.subjectId === selectedSubjectId.value)
+})
+
+const selectedCourse = computed(() => {
+  const subject = subjects.value.find((s) => s.id === selectedSubjectId.value)
+  return subject?.name || ''
 })
 
 /* ==================== 数据加载 ==================== */
@@ -115,7 +122,9 @@ async function handleGenerate() {
     }))
 
     const results = await Promise.all(payloads.map((p) => generateQuiz(p)))
-    const allQuestions = results.flatMap((r) => r.questions)
+    const allQuestions = results.flatMap((r, i) =>
+      r.questions.map((q) => ({ ...q, type: payloads[i].type }))
+    )
 
     if (allQuestions.length === 0) {
       errorMsg.value = 'AI 未能生成题目，请调整配置后重试。'
@@ -190,7 +199,74 @@ function handleSubmit() {
   })
 
   stage.value = 'review'
+  collectWrongQuestions()
   nextTick(() => scrollToQuestion())
+}
+
+async function collectWrongQuestions() {
+  const requests = gradingResults.value
+    .map((result, index) => ({ result, question: questions.value[index] }))
+    .filter(({ result, question }) => !result.correct && collectableType(question))
+    .map(({ result, question }) => buildWrongQuestionRequest(question, result.userAnswer, false))
+
+  if (requests.length === 0) return
+
+  try {
+    const saved = await saveWrongQuestionsBatch(requests)
+    questions.value = questions.value.map((question) => {
+      const item = saved.find((wrongQuestion) => wrongQuestion.stem === question.stem)
+      return item
+        ? { ...question, wrongBookAdded: true, wrongCount: item.wrongCount, wrongQuestionId: item.id }
+        : question
+    })
+  } catch (e) {
+    console.warn('自动收录错题失败', e)
+  }
+}
+
+async function handleManualAdd(question: Question, index: number) {
+  const type = collectableType(question)
+  if (!type) {
+    ElMessage.warning('简答题暂不加入错题本')
+    return
+  }
+
+  try {
+    const saved = await saveWrongQuestion(buildWrongQuestionRequest(question, null, true))
+    questions.value[index] = {
+      ...questions.value[index],
+      wrongBookAdded: true,
+      wrongCount: saved.wrongCount,
+      wrongQuestionId: saved.id
+    }
+    ElMessage.success('已加入错题本')
+  } catch {
+    ElMessage.error('加入错题本失败')
+  }
+}
+
+function buildWrongQuestionRequest(question: Question, wrongAnswer: string | null, manual: boolean): WrongQuestionSaveRequest {
+  const type = collectableType(question)
+  if (!selectedSubjectId.value || !type) {
+    throw new Error('题目无法加入错题本')
+  }
+  return {
+    subjectId: selectedSubjectId.value,
+    course: selectedCourse.value,
+    type,
+    stem: question.stem,
+    options: question.options ?? null,
+    answer: question.answer,
+    analysis: question.analysis,
+    wrongAnswer,
+    manual
+  }
+}
+
+function collectableType(question: Question): CollectableType | null {
+  if (question.type === 'single' || question.type === 'fill') return question.type
+  if (question.type === 'qa') return null
+  return question.options && question.options.length > 0 ? 'single' : 'fill'
 }
 
 /* ==================== 导航 ==================== */
@@ -399,6 +475,11 @@ function questionTypeLabel(q: Question): string {
               {{ q.stem }}
             </div>
 
+            <div v-if="q.wrongBookAdded || (!gradingResults[qi]?.correct && q.type !== 'qa')" class="wrong-book-note">
+              已加入错题本
+              <span v-if="q.wrongCount && q.wrongCount >= 2">，这道题你已经错了 {{ q.wrongCount }} 次</span>
+            </div>
+
             <!-- 用户答案 -->
             <div class="review-answer">
               <span class="answer-label">你的答案：</span>
@@ -418,6 +499,14 @@ function questionTypeLabel(q: Question): string {
               <span class="analysis-label">解析：</span>
               {{ q.analysis }}
             </div>
+
+            <button
+              v-if="gradingResults[qi]?.correct && collectableType(q) && !q.wrongBookAdded"
+              class="manual-add-btn"
+              @click="handleManualAdd(q, qi)"
+            >
+              加入错题本
+            </button>
           </div>
         </div>
       </div>
@@ -911,6 +1000,17 @@ function questionTypeLabel(q: Question): string {
   margin-bottom: var(--space-xs);
 }
 
+.wrong-book-note {
+  display: inline-block;
+  margin-bottom: var(--space-sm);
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+
 .answer-label {
   color: var(--color-text-assist);
 }
@@ -936,6 +1036,22 @@ function questionTypeLabel(q: Question): string {
 .analysis-label {
   font-weight: 600;
   color: var(--color-text-title);
+}
+
+.manual-add-btn {
+  margin-top: var(--space-md);
+  padding: 8px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card-bg);
+  color: var(--color-text-body);
+  font-size: var(--font-size-small);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+.manual-add-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 /* ==================== 加载旋转 ==================== */

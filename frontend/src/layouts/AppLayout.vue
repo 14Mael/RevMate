@@ -9,7 +9,7 @@
 import { computed } from 'vue'
 import { useRouter, useRoute, RouterView, RouterLink } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { PhBookOpen, PhSparkle, PhCheckSquare, PhSignOut } from '@/components/icons'
+import { PhBookOpen, PhSparkle, PhCheckSquare, PhSignOut, PhClockCounterClockwise } from '@/components/icons'
 
 const router = useRouter()
 const route = useRoute()
@@ -18,19 +18,21 @@ const userStore = useUserStore()
 interface NavItem {
   path: string
   label: string
-  icon: 'PhSparkle' | 'PhBookOpen' | 'PhCheckSquare'
+  icon: 'PhSparkle' | 'PhBookOpen' | 'PhCheckSquare' | 'PhClockCounterClockwise'
 }
 
 const navItems: NavItem[] = [
   { path: '/home', label: '智能问答', icon: 'PhSparkle' },
   { path: '/materials', label: '我的资料', icon: 'PhBookOpen' },
+  { path: '/wrong-questions', label: '错题本', icon: 'PhClockCounterClockwise' },
   { path: '/quiz', label: 'AI 出题', icon: 'PhCheckSquare' }
 ]
 
 const iconMap = {
   PhSparkle,
   PhBookOpen,
-  PhCheckSquare
+  PhCheckSquare,
+  PhClockCounterClockwise
 } as const
 
 const activePath = computed(() => route.path)

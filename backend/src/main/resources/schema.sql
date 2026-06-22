@@ -75,3 +75,28 @@ CREATE TABLE IF NOT EXISTS material_chunks (
         FOREIGN KEY (material_id) REFERENCES materials(id)
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 错题本表：按用户和课程隔离，同一题干只保留一条
+CREATE TABLE IF NOT EXISTS wrong_questions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    subject_id BIGINT NOT NULL,
+    course VARCHAR(100) NOT NULL,
+    type VARCHAR(20) NOT NULL COMMENT 'single/fill',
+    stem LONGTEXT NOT NULL,
+    stem_hash CHAR(64) NOT NULL COMMENT '题干 SHA-256，用于唯一约束',
+    options_json LONGTEXT COMMENT '选择题选项 JSON；填空为空',
+    answer VARCHAR(1000) NOT NULL,
+    analysis LONGTEXT,
+    wrong_answer VARCHAR(1000) COMMENT '最近一次错误答案',
+    wrong_count INT NOT NULL DEFAULT 1,
+    mastered TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_wrong_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_wrong_questions_user_id (user_id),
+    INDEX idx_wrong_questions_subject_id (subject_id),
+    UNIQUE KEY uk_wrong_questions_user_subject_stem (user_id, subject_id, stem_hash),
+    CONSTRAINT fk_wrong_questions_subject
+        FOREIGN KEY (subject_id) REFERENCES subjects(id)
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

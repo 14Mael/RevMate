@@ -122,11 +122,50 @@ export interface QuizRequest {
 
 export interface Question {
   stem: string
+  type?: QuizType
   options?: string[]
   answer: string
   analysis: string
+  wrongQuestionId?: number
+  wrongCount?: number
+  wrongBookAdded?: boolean
 }
 
 export interface QuizResponse {
   questions: Question[]
+}
+
+/* ========== 错题本 ========== */
+
+export interface WrongQuestion {
+  id: number
+  subjectId: number
+  course: string
+  type: Exclude<QuizType, 'qa'>
+  stem: string
+  options?: string[] | null
+  answer: string
+  analysis?: string | null
+  wrongAnswer?: string | null
+  wrongCount: number
+  mastered: boolean
+  createdAt: string
+  lastWrongAt: string
+}
+
+export interface WrongQuestionSaveRequest {
+  subjectId: number
+  course: string
+  type: Exclude<QuizType, 'qa'>
+  stem: string
+  options?: string[] | null
+  answer: string
+  analysis?: string | null
+  wrongAnswer?: string | null
+  manual: boolean
+}
+
+export interface GradingResult {
+  correct: boolean
+  userAnswer: string
 }

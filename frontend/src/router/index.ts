@@ -42,6 +42,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Quiz',
         component: () => import('@/views/QuizView.vue'),
         meta: { title: 'AI 出题' }
+      },
+      {
+        path: 'wrong-questions',
+        name: 'WrongQuestions',
+        component: () => import('@/views/WrongBookView.vue'),
+        meta: { title: '错题本' }
       }
     ]
   },
