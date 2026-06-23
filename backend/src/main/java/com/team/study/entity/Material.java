@@ -46,6 +46,11 @@ public class Material {
     @Column(name = "preview_path", length = 512)
     private String previewPath;
 
+    /** 提取出的完整文本；音频为 ASR 转写文字稿，用于预览展示。非音频类型可为 null */
+    @Lob
+    @Column(name = "transcript", columnDefinition = "LONGTEXT")
+    private String transcript;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "preview_status", length = 20)
     private PreviewStatus previewStatus;

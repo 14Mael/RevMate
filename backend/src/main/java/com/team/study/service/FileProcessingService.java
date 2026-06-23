@@ -42,9 +42,10 @@ public class FileProcessingService {
             // 计算预览 PDF 路径
             PreviewResult preview = resolvePreview(type, filename, filePath);
 
-            // 更新状态为 READY 并保存 previewPath
+            // 更新状态为 READY 并保存 previewPath、文字稿
             materialRepository.findById(materialId).ifPresent(material -> {
                 material.setStatus(Material.Status.READY);
+                material.setTranscript(extractedText);
                 material.setPreviewPath(preview.path());
                 material.setPreviewStatus(preview.status());
                 material.setPreviewMessage(preview.message());
@@ -98,6 +99,10 @@ public class FileProcessingService {
     private PreviewResult resolvePreview(String type, String filename, Path filePath) {
         if ("pdf".equals(type)) {
             return new PreviewResult(filePath.toString(), Material.PreviewStatus.READY, null);
+        }
+        // 音频：无 PDF 预览，但转写文字稿可用，标记 READY 走「播放器 + 文字稿」预览
+        if ("audio".equals(type)) {
+            return new PreviewResult(null, Material.PreviewStatus.READY, null);
         }
         if (pdfConversionService.isConvertibleType(type)) {
             try {

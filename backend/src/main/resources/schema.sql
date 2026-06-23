@@ -51,10 +51,12 @@ CREATE TABLE IF NOT EXISTS chat_histories (
     user_id BIGINT NOT NULL,
     title VARCHAR(200) NOT NULL,
     subject_id BIGINT COMMENT '会话关联的学科',
+    material_id BIGINT COMMENT '单资料问答关联的资料；智能问答为空',
     course VARCHAR(100) COMMENT '学科名快照',
     messages_json LONGTEXT COMMENT 'JSON 序列化的消息列表',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最近活跃时间，每次保存刷新',
-    INDEX idx_chat_histories_user_id (user_id)
+    INDEX idx_chat_histories_user_id (user_id),
+    INDEX idx_chat_histories_material_id (material_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 资料切片表：持久化 RAG/出题上下文，避免服务重启后 READY 资料无法检索

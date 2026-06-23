@@ -181,6 +181,44 @@ public class MaterialServiceImpl implements MaterialService {
         return new org.springframework.core.io.FileSystemResource(previewPath);
     }
 
+    @Override
+    public MaterialService.AudioResource getAudioResource(Long id) {
+        Material material = requireOwnedMaterial(id);
+        if (!"audio".equals(material.getType())) {
+            throw new IllegalArgumentException("该资料不是音频");
+        }
+        String storagePath = material.getStoragePath();
+        if (storagePath == null || storagePath.isBlank()) {
+            throw new IllegalArgumentException("音频文件不可用");
+        }
+        String contentType = detectMimeTypeByExtension(material.getFilename());
+        return new MaterialService.AudioResource(
+                new org.springframework.core.io.FileSystemResource(storagePath),
+                contentType,
+                material.getFilename());
+    }
+
+    @Override
+    public String getTranscript(Long id) {
+        Material material = requireOwnedMaterial(id);
+        String transcript = material.getTranscript();
+        return transcript == null ? "" : transcript;
+    }
+
+    /** 查找资料并校验归属当前用户 */
+    private Material requireOwnedMaterial(Long id) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        if (userId == null) {
+            throw new IllegalArgumentException("未登录");
+        }
+        Material material = materialRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("资料不存在"));
+        if (!material.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权访问该资料");
+        }
+        return material;
+    }
+
     /** 删除磁盘上的物理文件（含预览 PDF），best-effort：文件缺失或删除失败不阻断删库 */
     private void deletePhysicalFile(Material material) {
         deleteQuietly(material.getStoragePath());
@@ -210,15 +248,28 @@ public class MaterialServiceImpl implements MaterialService {
                 material.getType(),
                 material.getStatus().name(),
                 material.getCreatedAt(),
-                material.getPreviewPath() != null,
+                isPreviewable(material),
                 material.getPreviewStatus() != null ? material.getPreviewStatus().name() : Material.PreviewStatus.NONE.name(),
                 material.getPreviewMessage()
         );
     }
 
+    /**
+     * 是否可预览：
+     * - PDF/Office：依赖生成的预览 PDF（previewPath 非空）
+     * - 音频：转写完成后走「播放器 + 文字稿」预览（previewStatus=READY）
+     */
+    private boolean isPreviewable(Material material) {
+        if (material.getPreviewPath() != null) {
+            return true;
+        }
+        return "audio".equals(material.getType())
+                && material.getPreviewStatus() == Material.PreviewStatus.READY;
+    }
+
     private Material.PreviewStatus initialPreviewStatus(String type) {
         return switch (type) {
-            case "pdf", "word", "ppt", "excel" -> Material.PreviewStatus.PROCESSING;
+            case "pdf", "word", "ppt", "excel", "audio" -> Material.PreviewStatus.PROCESSING;
             default -> Material.PreviewStatus.NONE;
         };
     }

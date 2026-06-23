@@ -77,6 +77,7 @@ export interface ChatHistoryItem {
   messages: ChatHistoryMessage[]
   createdAt: string
   subjectId: number
+  materialId?: number | null
   course?: string
 }
 

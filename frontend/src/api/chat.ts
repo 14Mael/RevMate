@@ -70,11 +70,11 @@ export async function getHistoryList(): Promise<ChatHistoryItem[]> {
 
 /** 按会话 id upsert（id 走路径，保留「同一会话按 id 更新」语义） */
 export async function saveHistory(session: ChatHistoryItem): Promise<ChatHistoryItem> {
-  const { id, title, messages, subjectId, course } = session
+  const { id, title, messages, subjectId, materialId, course } = session
   return request<ChatHistoryItem>({
     url: `/chat/history/${id}`,
     method: 'PUT',
-    data: { title, messages, subjectId, course }
+    data: { title, messages, subjectId, materialId, course }
   })
 }
 

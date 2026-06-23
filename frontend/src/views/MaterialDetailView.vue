@@ -9,7 +9,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PhArrowLeft, PhChat, PhDownloadSimple, PhFileText, PhWarning } from '@/components/icons'
 import MaterialChatSidebar from '@/components/MaterialChatSidebar.vue'
-import { getMaterial, getPreviewUrl, canPreview } from '@/api/material'
+import { getMaterial, getPreviewUrl, getAudioUrl, getTranscript, canPreview } from '@/api/material'
 import type { Material } from '@/api/types'
 
 defineOptions({ name: 'MaterialDetailView' })
@@ -22,20 +22,47 @@ const material = ref<Material | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const previewUrl = ref('')
+const audioUrl = ref('')
+const transcript = ref('')
 const sidebarOpen = ref(true)
+const pdfIframe = ref<HTMLIFrameElement>()
 
-const previewAvailable = computed(() => !!material.value && canPreview(material.value) && !!previewUrl.value)
+const isAudio = computed(() => material.value?.type === 'audio')
+
+// 从 URL hash 提取页码（格式：#page=3）
+const targetPage = computed(() => {
+  const match = route.hash.match(/page=(\d+)/)
+  return match ? Number(match[1]) : null
+})
+
+const previewAvailable = computed(() => {
+  if (!material.value || !canPreview(material.value)) return false
+  if (isAudio.value) return !!audioUrl.value || !!transcript.value
+  return !!previewUrl.value
+})
+
+// 下载链接：音频用原文件，其它用预览 PDF
+const downloadUrl = computed(() => (isAudio.value ? audioUrl.value : previewUrl.value))
 
 const selectedText = ref('')
 const selectionTipVisible = ref(false)
 
-async function loadMaterial() {
-  loading.value = true
-  loadError.value = ''
+function revokeBlobUrls() {
   if (previewUrl.value) {
     URL.revokeObjectURL(previewUrl.value)
     previewUrl.value = ''
   }
+  if (audioUrl.value) {
+    URL.revokeObjectURL(audioUrl.value)
+    audioUrl.value = ''
+  }
+}
+
+async function loadMaterial() {
+  loading.value = true
+  loadError.value = ''
+  revokeBlobUrls()
+  transcript.value = ''
   try {
     const m = await getMaterial(materialId.value)
     if (!m) {
@@ -44,7 +71,13 @@ async function loadMaterial() {
     }
     material.value = m
     if (canPreview(m)) {
-      previewUrl.value = await getPreviewUrl(m.id)
+      if (m.type === 'audio') {
+        const [url, text] = await Promise.all([getAudioUrl(m.id), getTranscript(m.id)])
+        audioUrl.value = url
+        transcript.value = text
+      } else {
+        previewUrl.value = await getPreviewUrl(m.id)
+      }
     }
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '加载失败'
@@ -59,6 +92,50 @@ function goBack() {
 
 function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
+}
+
+// PDF 加载完成后跳转到指定页码
+const hasNavigated = ref(false)
+
+function onPdfLoad() {
+  // 无页码时直接显示第一页，不需要特殊处理
+  if (!targetPage.value || !pdfIframe.value || hasNavigated.value) return
+  
+  hasNavigated.value = true
+  
+  // 方案1：直接修改 iframe 内部 location.hash，不触发重新加载
+  try {
+    const iframeWin = pdfIframe.value.contentWindow
+    if (iframeWin) {
+      iframeWin.location.hash = `page=${targetPage.value}`
+      return
+    }
+  } catch {
+    // 跨域异常，继续尝试
+  }
+  
+  // 方案2：通过 postMessage 尝试调用 PDF 查看器 API
+  try {
+    pdfIframe.value.contentWindow?.postMessage({
+      type: 'scroll',
+      pageNumber: targetPage.value
+    }, '*')
+  } catch {
+    // 静默忽略
+  }
+  
+  // 方案3：延迟后重试（处理 iframe 内部初始化延迟）
+  setTimeout(() => {
+    if (!pdfIframe.value) return
+    try {
+      const iframeWin = pdfIframe.value.contentWindow
+      if (iframeWin && iframeWin.location) {
+        iframeWin.location.hash = `page=${targetPage.value}`
+      }
+    } catch {
+      // 静默忽略
+    }
+  }, 500)
 }
 
 // 文本选中提示
@@ -78,13 +155,25 @@ function handleMouseUp() {
   }
 }
 
-watch(materialId, loadMaterial)
-onMounted(loadMaterial)
-onUnmounted(() => {
-  if (previewUrl.value) {
-    URL.revokeObjectURL(previewUrl.value)
+watch(materialId, () => {
+  hasNavigated.value = false
+  loadMaterial()
+})
+
+// 监听 URL hash 变化（同一页面内跳转页码）
+watch(() => route.hash, (newHash) => {
+  const match = newHash.match(/page=(\d+)/)
+  if (match && pdfIframe.value) {
+    try {
+      pdfIframe.value.contentWindow!.location.hash = `page=${match[1]}`
+    } catch {
+      // 静默忽略
+    }
   }
 })
+
+onMounted(loadMaterial)
+onUnmounted(revokeBlobUrls)
 </script>
 
 <template>
@@ -115,7 +204,7 @@ onUnmounted(() => {
           <PhChat :size="16" />
           <span>问答</span>
         </button>
-        <a class="download-btn" :href="previewUrl || undefined" :download="material?.filename || 'preview.pdf'">
+        <a class="download-btn" :href="downloadUrl || undefined" :download="material?.filename || 'preview'">
           <PhDownloadSimple :size="16" />
           下载
         </a>
@@ -144,13 +233,28 @@ onUnmounted(() => {
           <button class="back-btn" @click="goBack">返回资料列表</button>
         </div>
 
+        <!-- 音频预览：播放器 + 转写文字稿 -->
+        <div v-else-if="isAudio" class="audio-preview">
+          <div class="audio-player-bar">
+            <PhFileText :size="18" class="audio-icon" />
+            <audio v-if="audioUrl" class="audio-player" :src="audioUrl" controls preload="metadata" />
+          </div>
+          <div class="transcript-panel">
+            <div class="transcript-title">转写文字稿</div>
+            <p v-if="transcript" class="transcript-text">{{ transcript }}</p>
+            <p v-else class="transcript-empty">暂无转写文字稿</p>
+          </div>
+        </div>
+
         <!-- 浏览器内置 PDF 查看器 -->
         <iframe
           v-else
+          ref="pdfIframe"
           class="pdf-iframe"
           :src="previewUrl"
           frameborder="0"
           title="PDF Preview"
+          @load="onPdfLoad"
         />
       </main>
 
@@ -309,6 +413,59 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   border: 0;
+}
+
+/* ---------- 音频预览 ---------- */
+.audio-preview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-page-bg);
+  overflow: hidden;
+}
+
+.audio-player-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--color-card-bg);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.audio-icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.audio-player {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+}
+
+.transcript-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+.transcript-title {
+  color: var(--color-text-assist);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  margin-bottom: var(--space-md);
+}
+.transcript-text {
+  color: var(--color-text-body);
+  font-size: var(--font-size-body);
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.transcript-empty {
+  color: var(--color-text-assist);
+  font-size: var(--font-size-body);
 }
 
 .error-state,

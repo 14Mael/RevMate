@@ -53,6 +53,17 @@ export async function getPreviewUrl(id: number): Promise<string> {
   return URL.createObjectURL(response.data)
 }
 
+/** 音频原文件 blob URL（带鉴权头取流后转 objectURL，供 <audio> 播放） */
+export async function getAudioUrl(id: number): Promise<string> {
+  const response = await http.get<Blob>(`/materials/${id}/audio`, { responseType: 'blob' })
+  return URL.createObjectURL(response.data)
+}
+
+/** 转写文字稿 */
+export function getTranscript(id: number): Promise<string> {
+  return request<string>({ url: `/materials/${id}/transcript`, method: 'GET' })
+}
+
 export function canPreview(material: Material): boolean {
   return material.previewable && material.previewStatus === 'READY'
 }
