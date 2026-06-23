@@ -1,0 +1,8 @@
+export * from './types'
+export { default as http, request } from './http'
+export * as authApi from './auth'
+export * as subjectApi from './subject'
+export * as materialApi from './material'
+export * as chatApi from './chat'
+export * as quizApi from './quiz'
+export * as wrongQuestionApi from './wrongQuestion'

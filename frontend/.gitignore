@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vite/
+.DS_Store
+*.local
+*.log
+.env
+.env.local
+
+# unplugin 自动生成的类型声明（首次 dev/build 时再生成）
+auto-imports.d.ts
+components.d.ts
