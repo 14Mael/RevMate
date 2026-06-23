@@ -6,7 +6,7 @@
  *
  * 设计依据：frontend-design-spec.md §8.1
  */
-import { computed } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { useRouter, useRoute, RouterView, RouterLink } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { PhBookOpen, PhSparkle, PhCheckSquare, PhSignOut, PhClockCounterClockwise } from '@/components/icons'
@@ -36,6 +36,26 @@ const iconMap = {
 } as const
 
 const activePath = computed(() => route.path)
+const rememberedNavPaths = reactive<Record<string, string>>({})
+
+function isNavActive(path: string, item: NavItem) {
+  return path === item.path || path.startsWith(`${item.path}/`)
+}
+
+function navTarget(item: NavItem) {
+  return rememberedNavPaths[item.path] || item.path
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    const currentItem = navItems.find((item) => isNavActive(route.path, item))
+    if (currentItem) {
+      rememberedNavPaths[currentItem.path] = route.fullPath
+    }
+  },
+  { immediate: true }
+)
 
 function goHome() {
   router.push('/home')
@@ -66,9 +86,9 @@ function logout() {
         <RouterLink
           v-for="item in navItems"
           :key="item.path"
-          :to="item.path"
+          :to="navTarget(item)"
           class="nav-item"
-          :class="{ 'nav-item--active': activePath.startsWith(item.path) }"
+          :class="{ 'nav-item--active': isNavActive(activePath, item) }"
         >
           <component :is="iconMap[item.icon]" :size="18" weight="duotone" class="nav-icon" />
           <span class="nav-label">{{ item.label }}</span>
@@ -90,7 +110,12 @@ function logout() {
 
     <!-- 主区域 -->
     <main class="content">
-      <RouterView />
+      <!-- 主菜单业务页用 keep-alive 缓存：切换菜单后返回可保留各页面进行中的操作状态 -->
+      <RouterView v-slot="{ Component }">
+        <keep-alive :include="['HomeView', 'MaterialsView', 'MaterialDetailView', 'WrongBookView', 'QuizView']">
+          <component :is="Component" />
+        </keep-alive>
+      </RouterView>
     </main>
   </div>
 </template>

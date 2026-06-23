@@ -13,6 +13,9 @@ import { saveWrongQuestion, saveWrongQuestionsBatch } from '@/api/wrongQuestion'
 import { PhArrowLeft, PhCheckSquare, PhSparkle, PhWarning } from '@/components/icons'
 import type { Material, Question, QuizType, Subject, WrongQuestionSaveRequest } from '@/api/types'
 
+// 命名组件，供 AppLayout 的 <keep-alive :include> 按名缓存，切换菜单后返回可保留出题/答题进度
+defineOptions({ name: 'QuizView' })
+
 type Stage = 'config' | 'quiz' | 'review'
 type CollectableType = Exclude<QuizType, 'qa'>
 

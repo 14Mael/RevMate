@@ -30,6 +30,8 @@ import {
 import { findOrCreateSubject, listSubjects } from '@/api/subject'
 import type { Material, MaterialStatus, MaterialType, Subject } from '@/api/types'
 
+defineOptions({ name: 'MaterialsView' })
+
 const router = useRouter()
 
 const materials = ref<Material[]>([])

@@ -11,6 +11,8 @@ import QuizRunner from '@/components/QuizRunner.vue'
 import { PhBookOpen, PhCheckSquare, PhSparkle, PhTrash, PhWarning } from '@/components/icons'
 import type { GradingResult, Question, WrongQuestion } from '@/api/types'
 
+defineOptions({ name: 'WrongBookView' })
+
 type Stage = 'list' | 'redo'
 type TypeFilter = 'all' | 'single' | 'fill'
 

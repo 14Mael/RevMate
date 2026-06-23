@@ -12,6 +12,8 @@ import MaterialChatSidebar from '@/components/MaterialChatSidebar.vue'
 import { getMaterial, getPreviewUrl, canPreview } from '@/api/material'
 import type { Material } from '@/api/types'
 
+defineOptions({ name: 'MaterialDetailView' })
+
 const route = useRoute()
 const router = useRouter()
 

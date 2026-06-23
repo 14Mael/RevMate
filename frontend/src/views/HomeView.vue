@@ -19,6 +19,9 @@ import ChatHistoryPanel from '@/components/ChatHistoryPanel.vue'
 import { PhPaperPlaneTilt, PhSparkle, PhBookOpen, PhQuotes, PhCaretDown, PhClockCounterClockwise, PhPlus } from '@/components/icons'
 import type { ChatHistoryItem, Source, Subject } from '@/api/types'
 
+// 命名组件，供 AppLayout 的 <keep-alive :include> 按名缓存，切换菜单后返回可保留进行中的问答
+defineOptions({ name: 'HomeView' })
+
 const route = useRoute()
 
 /* ==================== 消息数据 ==================== */
