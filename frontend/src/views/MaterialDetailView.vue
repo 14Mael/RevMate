@@ -7,10 +7,13 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PhArrowLeft, PhChat, PhDownloadSimple, PhFileText, PhWarning } from '@/components/icons'
+import { ElMessage } from 'element-plus'
+import { PhArrowLeft, PhChat, PhDownloadSimple, PhFileText, PhSparkle, PhWarning } from '@/components/icons'
 import MaterialChatSidebar from '@/components/MaterialChatSidebar.vue'
+import CourseCardItem from '@/components/CourseCard.vue'
 import { getMaterial, getPreviewUrl, getAudioUrl, getTranscript, canPreview } from '@/api/material'
-import type { Material } from '@/api/types'
+import { extractCourseKeywords, recommendCourses, saveCourse } from '@/api/courses'
+import type { CourseCard, Material, SavedCourse } from '@/api/types'
 
 defineOptions({ name: 'MaterialDetailView' })
 
@@ -25,6 +28,13 @@ const previewUrl = ref('')
 const audioUrl = ref('')
 const transcript = ref('')
 const sidebarOpen = ref(true)
+const coursePanelOpen = ref(false)
+const courseKeywords = ref<string[]>([])
+const keywordInput = ref('')
+const courseResults = ref<CourseCard[]>([])
+const keywordLoading = ref(false)
+const recommendLoading = ref(false)
+const savingCourseUrl = ref('')
 const pdfIframe = ref<HTMLIFrameElement>()
 
 const isAudio = computed(() => material.value?.type === 'audio')
@@ -92,6 +102,63 @@ function goBack() {
 
 function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
+}
+
+async function toggleCoursePanel() {
+  coursePanelOpen.value = !coursePanelOpen.value
+  if (coursePanelOpen.value && courseKeywords.value.length === 0) {
+    await loadCourseKeywords()
+  }
+}
+
+async function loadCourseKeywords() {
+  if (!material.value) return
+  keywordLoading.value = true
+  try {
+    courseKeywords.value = await extractCourseKeywords(material.value.id)
+    keywordInput.value = courseKeywords.value.join(' ')
+  } catch {
+    ElMessage.error('关键词提炼失败')
+  } finally {
+    keywordLoading.value = false
+  }
+}
+
+function parseKeywordInput() {
+  return keywordInput.value
+    .split(/[\s,，、;；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+async function recommendForMaterial() {
+  const keywords = parseKeywordInput()
+  if (keywords.length === 0) {
+    ElMessage.warning('请先输入关键词')
+    return
+  }
+
+  recommendLoading.value = true
+  try {
+    courseResults.value = await recommendCourses(keywords)
+    if (courseResults.value.length === 0) {
+      ElMessage.info('暂时没有找到合适的课程')
+    }
+  } catch {
+    ElMessage.error('搜索服务暂不可用')
+  } finally {
+    recommendLoading.value = false
+  }
+}
+
+async function saveRecommendedCourse(course: CourseCard | SavedCourse) {
+  savingCourseUrl.value = course.url
+  try {
+    await saveCourse({ ...course, subjectId: material.value?.subjectId ?? null })
+    ElMessage.success('已收藏')
+  } finally {
+    savingCourseUrl.value = ''
+  }
 }
 
 // PDF 加载完成后跳转到指定页码
@@ -197,6 +264,15 @@ onUnmounted(revokeBlobUrls)
       <div class="toolbar-right">
         <button
           class="sidebar-toggle-btn"
+          :class="{ active: coursePanelOpen }"
+          @click="toggleCoursePanel"
+          title="推荐课程"
+        >
+          <PhSparkle :size="16" />
+          <span>推荐课程</span>
+        </button>
+        <button
+          class="sidebar-toggle-btn"
           :class="{ active: sidebarOpen }"
           @click="toggleSidebar"
           title="问答侧边栏"
@@ -266,6 +342,54 @@ onUnmounted(revokeBlobUrls)
         :material-name="material.filename"
         @close="sidebarOpen = false"
       />
+
+      <aside v-if="coursePanelOpen && material" class="course-panel">
+        <div class="course-panel-header">
+          <div>
+            <h3>推荐课程</h3>
+            <p>基于当前资料提炼关键词，搜索可继续学习的资源。</p>
+          </div>
+        </div>
+
+        <div class="keyword-box">
+          <div class="keyword-label">关键词</div>
+          <div v-if="keywordLoading" class="panel-muted">正在提炼关键词...</div>
+          <input
+            v-else
+            v-model="keywordInput"
+            class="keyword-input"
+            placeholder="例如：进程调度 死锁"
+            @keyup.enter="recommendForMaterial"
+          />
+          <div v-if="courseKeywords.length > 0" class="keyword-chips">
+            <button
+              v-for="keyword in courseKeywords"
+              :key="keyword"
+              class="keyword-chip"
+              @click="keywordInput = keyword"
+            >
+              {{ keyword }}
+            </button>
+          </div>
+        </div>
+
+        <button class="recommend-btn" :disabled="keywordLoading || recommendLoading" @click="recommendForMaterial">
+          {{ recommendLoading ? '推荐中...' : '生成推荐' }}
+        </button>
+
+        <div v-if="!recommendLoading && courseResults.length === 0" class="panel-empty">
+          课程推荐会显示在这里。
+        </div>
+        <div v-else class="panel-list">
+          <CourseCardItem
+            v-for="course in courseResults"
+            :key="course.url"
+            :course="course"
+            :busy="savingCourseUrl === course.url"
+            @save="saveRecommendedCourse"
+          />
+        </div>
+      </aside>
     </div>
   </div>
 </template>
@@ -505,5 +629,119 @@ onUnmounted(revokeBlobUrls)
   background: var(--color-primary-light);
   color: var(--color-primary);
   font-size: var(--font-size-small);
+}
+
+/* ---------- 推荐课程侧栏 ---------- */
+.course-panel {
+  width: 380px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  border-left: 1px solid var(--color-border);
+  background: var(--color-page-bg);
+  overflow-y: auto;
+}
+
+.course-panel-header h3 {
+  margin: 0 0 var(--space-xs) 0;
+  color: var(--color-text-title);
+  font-size: var(--font-size-h3);
+}
+
+.course-panel-header p {
+  margin: 0;
+  color: var(--color-text-assist);
+  font-size: var(--font-size-small);
+  line-height: 1.6;
+}
+
+.keyword-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.keyword-label {
+  color: var(--color-text-title);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+}
+
+.keyword-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card-bg);
+  color: var(--color-text-body);
+  font-size: var(--font-size-small);
+  outline: none;
+}
+
+.keyword-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.keyword-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.keyword-chip {
+  border: 0;
+  border-radius: var(--radius-full);
+  padding: 4px 10px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
+.recommend-btn {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-button-primary);
+}
+
+.recommend-btn:hover:not(:disabled) {
+  background: #4566E6;
+}
+
+.recommend-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.panel-empty,
+.panel-muted {
+  padding: var(--space-lg);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card-bg);
+  color: var(--color-text-assist);
+  font-size: var(--font-size-small);
+  text-align: center;
+}
+
+@media (max-width: 1023px) {
+  .course-panel {
+    width: 320px;
+  }
 }
 </style>

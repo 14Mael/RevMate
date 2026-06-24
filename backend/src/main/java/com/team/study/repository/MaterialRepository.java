@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface MaterialRepository extends JpaRepository<Material, Long> {
@@ -15,6 +16,7 @@ public interface MaterialRepository extends JpaRepository<Material, Long> {
     boolean existsByIdAndUserId(Long id, Long userId);
     boolean existsByIdAndUserIdAndSubjectId(Long id, Long userId, Long subjectId);
     boolean existsBySubjectIdAndUserId(Long subjectId, Long userId);
+    Optional<Material> findByIdAndUserId(Long id, Long userId);
 
     @Query("select m.id from Material m where m.userId = :userId and m.subjectId = :subjectId")
     List<Long> findIdsByUserIdAndSubjectId(@Param("userId") Long userId, @Param("subjectId") Long subjectId);

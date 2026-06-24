@@ -95,6 +95,59 @@ class SubjectServiceImplTest {
     }
 
     @Test
+    void updateTrimsNameAndSavesForCurrentUser() {
+        loginAs(5L);
+        Subject subject = subject(1L, 5L, "Java");
+        when(subjectRepository.findById(1L)).thenReturn(Optional.of(subject));
+        when(subjectRepository.findByUserIdAndName(5L, "数据结构")).thenReturn(Optional.empty());
+        when(subjectRepository.save(subject)).thenReturn(subject);
+
+        SubjectResponse response = subjectService.update(1L, request("  数据结构  "));
+
+        assertThat(response.getName()).isEqualTo("数据结构");
+        verify(subjectRepository).save(argThat(s ->
+                s.getId().equals(1L) && s.getName().equals("数据结构")));
+    }
+
+    @Test
+    void updateAllowsKeepingSameName() {
+        loginAs(5L);
+        Subject subject = subject(1L, 5L, "Java");
+        when(subjectRepository.findById(1L)).thenReturn(Optional.of(subject));
+        when(subjectRepository.findByUserIdAndName(5L, "Java")).thenReturn(Optional.of(subject));
+        when(subjectRepository.save(subject)).thenReturn(subject);
+
+        SubjectResponse response = subjectService.update(1L, request(" Java "));
+
+        assertThat(response.getName()).isEqualTo("Java");
+    }
+
+    @Test
+    void updateRejectsDuplicateNameForCurrentUser() {
+        loginAs(5L);
+        Subject subject = subject(1L, 5L, "Java");
+        Subject duplicate = subject(2L, 5L, "数据结构");
+        when(subjectRepository.findById(1L)).thenReturn(Optional.of(subject));
+        when(subjectRepository.findByUserIdAndName(5L, "数据结构")).thenReturn(Optional.of(duplicate));
+
+        assertThatThrownBy(() -> subjectService.update(1L, request("数据结构")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("学科已存在");
+        verify(subjectRepository, never()).save(any(Subject.class));
+    }
+
+    @Test
+    void updateRejectsOtherUsersSubject() {
+        loginAs(5L);
+        Subject subject = subject(1L, 9L, "Java");
+        when(subjectRepository.findById(1L)).thenReturn(Optional.of(subject));
+
+        assertThatThrownBy(() -> subjectService.update(1L, request("数据结构")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("学科不存在或无权访问");
+    }
+
+    @Test
     void deleteRejectsNonEmptySubject() {
         loginAs(5L);
         Subject subject = subject(1L, 5L, "Java");

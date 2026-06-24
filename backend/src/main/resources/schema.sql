@@ -78,6 +78,21 @@ CREATE TABLE IF NOT EXISTS material_chunks (
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 推荐课程收藏表：推荐结果不持久化，只有用户主动收藏的课程入库
+CREATE TABLE IF NOT EXISTS saved_courses (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    platform VARCHAR(100),
+    url VARCHAR(1024) NOT NULL,
+    reason VARCHAR(1000),
+    difficulty VARCHAR(20),
+    subject_id BIGINT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_saved_courses_user_id (user_id),
+    INDEX idx_saved_courses_subject_id (subject_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- 错题本表：按用户和课程隔离，同一题干只保留一条
 CREATE TABLE IF NOT EXISTS wrong_questions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

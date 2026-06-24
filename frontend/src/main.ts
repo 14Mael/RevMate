@@ -19,5 +19,9 @@ import './assets/styles/element-overrides.scss'
 const app = createApp(App)
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus)
+app.use(ElementPlus, {
+  message: {
+    offset: 72
+  }
+})
 app.mount('#app')

@@ -27,6 +27,11 @@ public class SubjectController {
         return Result.success(subjectService.list());
     }
 
+    @PutMapping("/{id}")
+    public Result<SubjectResponse> update(@PathVariable Long id, @Valid @RequestBody CreateSubjectRequest request) {
+        return Result.success(subjectService.update(id, request));
+    }
+
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         subjectService.delete(id);

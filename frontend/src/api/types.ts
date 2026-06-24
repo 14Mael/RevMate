@@ -170,3 +170,31 @@ export interface GradingResult {
   correct: boolean
   userAnswer: string
 }
+
+/* ========== 推荐课程 ========== */
+
+export interface CourseCard {
+  title: string
+  platform: string
+  url: string
+  reason: string
+  difficulty: string
+}
+
+export interface CourseKeywordRequest {
+  materialId: number
+}
+
+export interface CourseRecommendRequest {
+  keywords: string[]
+}
+
+export interface SavedCourse extends CourseCard {
+  id: number
+  subjectId?: number | null
+  createdAt: string
+}
+
+export interface SavedCourseRequest extends CourseCard {
+  subjectId?: number | null
+}

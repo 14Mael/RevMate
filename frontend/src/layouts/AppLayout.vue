@@ -24,6 +24,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { path: '/home', label: '智能问答', icon: 'PhSparkle' },
   { path: '/materials', label: '我的资料', icon: 'PhBookOpen' },
+  { path: '/recommend', label: '推荐课程', icon: 'PhSparkle' },
   { path: '/wrong-questions', label: '错题本', icon: 'PhClockCounterClockwise' },
   { path: '/quiz', label: 'AI 出题', icon: 'PhCheckSquare' }
 ]
@@ -112,7 +113,7 @@ function logout() {
     <main class="content">
       <!-- 主菜单业务页用 keep-alive 缓存：切换菜单后返回可保留各页面进行中的操作状态 -->
       <RouterView v-slot="{ Component }">
-        <keep-alive :include="['HomeView', 'MaterialsView', 'MaterialDetailView', 'WrongBookView', 'QuizView']">
+        <keep-alive :include="['HomeView', 'MaterialsView', 'MaterialDetailView', 'WrongBookView', 'QuizView', 'RecommendView']">
           <component :is="Component" />
         </keep-alive>
       </RouterView>

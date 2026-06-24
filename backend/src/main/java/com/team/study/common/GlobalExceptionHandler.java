@@ -66,6 +66,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(Result.badRequest(e.getMessage()));
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Result<Void>> handleIllegalState(IllegalStateException e) {
+        // 外部依赖暂不可用（如搜索服务）等场景，返回干净的 503 文案而非「服务器内部错误」
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Result.error(503, e.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<Void>> handleUnknown(Exception e) {
         log.error("未处理的异常", e);

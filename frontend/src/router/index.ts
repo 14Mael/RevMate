@@ -44,6 +44,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'AI 出题' }
       },
       {
+        path: 'recommend',
+        name: 'Recommend',
+        component: () => import('@/views/RecommendView.vue'),
+        meta: { title: '推荐课程' }
+      },
+      {
         path: 'wrong-questions',
         name: 'WrongQuestions',
         component: () => import('@/views/WrongBookView.vue'),
