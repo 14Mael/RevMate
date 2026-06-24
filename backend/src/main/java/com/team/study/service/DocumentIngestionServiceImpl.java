@@ -22,6 +22,8 @@ import java.util.stream.Collectors;
 public class DocumentIngestionServiceImpl implements DocumentIngestionService {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentIngestionServiceImpl.class);
+    private static final int CHUNK_SIZE = 500;
+    private static final int CHUNK_OVERLAP = 50;
 
     private final MaterialChunkRepository materialChunkRepository;
     private final MaterialRepository materialRepository;
@@ -51,8 +53,8 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
             return;
         }
 
-        // 简单切片（按段落/句子切分）
-        List<String> segments = splitText(text, 500);
+        // 简单切片（按段落/句子切分，相邻片保留少量重叠，降低边界丢召回概率）
+        List<String> segments = splitText(text, CHUNK_SIZE);
         List<MaterialChunk> chunks = new ArrayList<>();
 
         for (int i = 0; i < segments.size(); i++) {
@@ -96,13 +98,24 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
 
     private List<Document> retrieveFromChunks(List<MaterialChunk> candidateChunks, Long userId, String query, int topK) {
         float[] queryEmbedding = createQueryEmbedding(query);
-        List<Document> results = new ArrayList<>();
+        List<ChunkScores> scoredChunks = new ArrayList<>();
+        double maxKeywordScore = 0.0;
         for (MaterialChunk chunk : candidateChunks) {
             double keywordScore = keywordScore(chunk, query);
             double vectorScore = queryEmbedding == null ? 0.0 : vectorScore(chunk, queryEmbedding);
+            maxKeywordScore = Math.max(maxKeywordScore, keywordScore);
+            scoredChunks.add(new ChunkScores(chunk, keywordScore, vectorScore));
+        }
+
+        List<Document> results = new ArrayList<>();
+        for (ChunkScores scoredChunk : scoredChunks) {
+            MaterialChunk chunk = scoredChunk.chunk();
+            double keywordScore = scoredChunk.keywordScore();
+            double vectorScore = scoredChunk.vectorScore();
+            double normalizedKeywordScore = maxKeywordScore > 0.0 ? keywordScore / maxKeywordScore : 0.0;
             double score = queryEmbedding == null
                     ? keywordScore
-                    : vectorScore * 0.75 + keywordScore * 0.25;
+                    : vectorScore * 0.75 + normalizedKeywordScore * 0.25;
             if (score > 0.0) {
                 Document doc = new Document(chunk.getText(), Map.of(
                         "userId", userId.toString(),
@@ -261,9 +274,11 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
     }
 
     /**
-     * 简单文本切片
+     * 简单文本切片。
      */
     private List<String> splitText(String text, int maxLen) {
+        int overlap = effectiveOverlap(maxLen);
+        int longParagraphStep = maxLen - overlap;
         List<String> result = new ArrayList<>();
         String[] paragraphs = text.split("\n");
         StringBuilder current = new StringBuilder();
@@ -271,25 +286,54 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
         for (String p : paragraphs) {
             if (p.length() > maxLen) {
                 if (current.length() > 0) {
-                    result.add(current.toString().trim());
+                    addChunk(result, current.toString());
                     current = new StringBuilder();
                 }
-                for (int start = 0; start < p.length(); start += maxLen) {
+                for (int start = 0; start < p.length(); start += longParagraphStep) {
                     int end = Math.min(start + maxLen, p.length());
-                    result.add(p.substring(start, end));
+                    addChunk(result, p.substring(start, end));
+                    if (end == p.length()) {
+                        break;
+                    }
                 }
                 continue;
             }
-            if (current.length() + p.length() > maxLen && current.length() > 0) {
-                result.add(current.toString().trim());
-                current = new StringBuilder();
+            String paragraph = p + "\n";
+            if (current.length() + paragraph.length() > maxLen && current.length() > 0) {
+                String completed = addChunk(result, current.toString());
+                current = new StringBuilder(overlapTail(completed, overlap));
+                if (current.length() + paragraph.length() > maxLen) {
+                    current = new StringBuilder();
+                }
             }
-            current.append(p).append("\n");
+            current.append(paragraph);
         }
         if (current.length() > 0) {
-            result.add(current.toString().trim());
+            addChunk(result, current.toString());
         }
         return result;
+    }
+
+    private int effectiveOverlap(int maxLen) {
+        if (CHUNK_OVERLAP <= 0 || CHUNK_OVERLAP >= maxLen) {
+            return 0;
+        }
+        return CHUNK_OVERLAP;
+    }
+
+    private String addChunk(List<String> result, String text) {
+        String chunk = text.trim();
+        if (!chunk.isBlank()) {
+            result.add(chunk);
+        }
+        return chunk;
+    }
+
+    private String overlapTail(String text, int overlap) {
+        if (overlap <= 0 || text.length() <= overlap) {
+            return text;
+        }
+        return text.substring(text.length() - overlap);
     }
 
     private List<MaterialChunk> selectMaterialContextChunks(List<MaterialChunk> chunks, String query, int maxChunks) {
@@ -400,6 +444,9 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
             grams.add(text.substring(i, i + n));
         }
         return grams;
+    }
+
+    private record ChunkScores(MaterialChunk chunk, double keywordScore, double vectorScore) {
     }
 
     private static EmbeddingService disabledEmbeddingService() {

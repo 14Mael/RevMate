@@ -17,7 +17,8 @@ import java.time.LocalDateTime;
 @Table(
         name = "chat_histories",
         indexes = {
-                @Index(name = "idx_chat_histories_user_id", columnList = "user_id")
+                @Index(name = "idx_chat_histories_user_id", columnList = "user_id"),
+                @Index(name = "idx_chat_histories_material_id", columnList = "material_id")
         }
 )
 public class ChatHistory {
@@ -34,6 +35,9 @@ public class ChatHistory {
 
     @Column(name = "subject_id")
     private Long subjectId;
+
+    @Column(name = "material_id")
+    private Long materialId;
 
     @Column(length = 100)
     private String course;

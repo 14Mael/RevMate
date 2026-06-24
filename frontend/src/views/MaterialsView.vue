@@ -27,7 +27,7 @@ import {
   listMaterials,
   uploadMaterial
 } from '@/api/material'
-import { findOrCreateSubject, listSubjects } from '@/api/subject'
+import { deleteSubject, findOrCreateSubject, listSubjects, updateSubject } from '@/api/subject'
 import type { Material, MaterialStatus, MaterialType, Subject } from '@/api/types'
 
 defineOptions({ name: 'MaterialsView' })
@@ -42,6 +42,10 @@ const fileInputRef = ref<HTMLInputElement>()
 
 // ---------- 上传弹窗 ----------
 const uploadDialogVisible = ref(false)
+const courseDialogVisible = ref(false)
+const courseSavingId = ref<number | null>(null)
+const courseDeletingId = ref<number | null>(null)
+const courseDrafts = ref<Record<number, string>>({})
 const uploadForm = reactive<{
   file: File | null
   course: string
@@ -116,6 +120,11 @@ const hasMaterials = computed(() => materials.value.length > 0)
 
 const effectiveCourse = computed(() => uploadForm.customCourse.trim() || uploadForm.course)
 
+const courseRows = computed(() => subjects.value.map((subject) => ({
+  subject,
+  materialCount: materials.value.filter((material) => material.subjectId === subject.id).length
+})))
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
@@ -133,6 +142,11 @@ function resetAndOpenDialog() {
   uploadDialogVisible.value = true
   // 弹窗打开后再触发文件选择
   window.setTimeout(() => fileInputRef.value?.click(), 200)
+}
+
+function openCourseManager() {
+  courseDrafts.value = Object.fromEntries(subjects.value.map((subject) => [subject.id, subject.name]))
+  courseDialogVisible.value = true
 }
 
 function showUploadDialog() {
@@ -198,6 +212,60 @@ async function refreshMaterials() {
   }
 }
 
+async function renameSubject(subject: Subject) {
+  const name = courseDrafts.value[subject.id]?.trim() || ''
+  if (!name) {
+    ElMessage.warning('课程名称不能为空')
+    return
+  }
+  if (name === subject.name) {
+    ElMessage.info('课程名称没有变化')
+    return
+  }
+
+  courseSavingId.value = subject.id
+  try {
+    const updated = await updateSubject(subject.id, { name })
+    subjects.value = subjects.value.map((item) => item.id === updated.id ? updated : item)
+    materials.value = materials.value.map((item) =>
+      item.subjectId === updated.id ? { ...item, course: updated.name } : item
+    )
+    courseDrafts.value[updated.id] = updated.name
+    ElMessage.success('课程已重命名')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '重命名失败')
+  } finally {
+    courseSavingId.value = null
+  }
+}
+
+async function removeSubject(subject: Subject, materialCount: number) {
+  if (materialCount > 0) {
+    ElMessage.warning('请先删除该课程下的资料，再删除课程')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(`确定删除课程「${subject.name}」吗？`, '删除课程', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    courseDeletingId.value = subject.id
+    await deleteSubject(subject.id)
+    subjects.value = subjects.value.filter((item) => item.id !== subject.id)
+    const { [subject.id]: _removed, ...rest } = courseDrafts.value
+    courseDrafts.value = rest
+    ElMessage.success('课程已删除')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error instanceof Error ? error.message : '删除课程失败')
+    }
+  } finally {
+    courseDeletingId.value = null
+  }
+}
+
 async function removeMaterial(material: Material) {
   try {
     await ElMessageBox.confirm(`确定删除「${material.filename}」吗？`, '删除资料', {
@@ -229,10 +297,16 @@ onMounted(refreshMaterials)
         <h1>我的资料</h1>
         <p>上传复习材料，按课程分类管理。上传后可以在线预览并选中文字提问。</p>
       </div>
-      <el-button type="primary" :loading="uploading" @click="resetAndOpenDialog">
-        <PhUploadSimple :size="16" weight="bold" />
-        上传资料
-      </el-button>
+      <div class="header-actions">
+        <el-button @click="openCourseManager">
+          <PhFolderOpen :size="16" weight="duotone" />
+          管理课程
+        </el-button>
+        <el-button type="primary" :loading="uploading" @click="resetAndOpenDialog">
+          <PhUploadSimple :size="16" weight="bold" />
+          上传资料
+        </el-button>
+      </div>
     </div>
 
     <!-- 上传区 -->
@@ -353,6 +427,52 @@ onMounted(refreshMaterials)
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 课程管理弹窗 -->
+    <el-dialog
+      v-model="courseDialogVisible"
+      title="管理课程"
+      width="560px"
+      destroy-on-close
+    >
+      <div v-if="courseRows.length > 0" class="course-manager-list">
+        <div v-for="{ subject, materialCount } in courseRows" :key="subject.id" class="course-manager-row">
+          <div class="course-manager-main">
+            <el-input
+              v-model="courseDrafts[subject.id]"
+              maxlength="100"
+              show-word-limit
+              placeholder="课程名称"
+            />
+            <span class="course-manager-count">{{ materialCount }} 份资料</span>
+          </div>
+          <div class="course-manager-actions">
+            <el-button
+              size="small"
+              :loading="courseSavingId === subject.id"
+              @click="renameSubject(subject)"
+            >
+              保存
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              plain
+              :disabled="materialCount > 0"
+              :loading="courseDeletingId === subject.id"
+              :title="materialCount > 0 ? '请先删除该课程下的资料' : '删除课程'"
+              @click="removeSubject(subject, materialCount)"
+            >
+              删除
+            </el-button>
+          </div>
+        </div>
+      </div>
+      <el-empty v-else description="还没有课程，上传资料时可以新建课程" />
+      <template #footer>
+        <el-button @click="courseDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -380,10 +500,20 @@ onMounted(refreshMaterials)
   font-size: var(--font-size-body);
 }
 
-.page-header :deep(.el-button) {
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.header-actions :deep(.el-button) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
+}
+
+.header-actions :deep(.el-button--primary) {
   box-shadow: var(--shadow-button-primary);
 }
 
@@ -692,14 +822,56 @@ onMounted(refreshMaterials)
   font-size: var(--font-size-small);
 }
 
+/* ---------- 课程管理 ---------- */
+.course-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.course-manager-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card-bg);
+}
+
+.course-manager-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.course-manager-count {
+  display: inline-block;
+  margin-top: var(--space-xs);
+  color: var(--color-text-assist);
+  font-size: var(--font-size-small);
+}
+
+.course-manager-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
 @media (max-width: 767px) {
   .page-header {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .page-header :deep(.el-button) {
+  .header-actions {
     width: 100%;
+    flex-direction: column;
+  }
+
+  .header-actions :deep(.el-button) {
+    width: 100%;
+    margin-left: 0;
   }
 
   .upload-card {
@@ -712,6 +884,12 @@ onMounted(refreshMaterials)
 
   .delete-btn {
     opacity: 1;
+  }
+
+  .course-manager-row,
+  .course-manager-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 </style>

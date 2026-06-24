@@ -13,5 +13,6 @@ public class ChatHistorySaveRequest {
     private String title;
     private List<ChatHistoryMessageDto> messages;
     private Long subjectId;
+    private Long materialId;
     private String course;
 }

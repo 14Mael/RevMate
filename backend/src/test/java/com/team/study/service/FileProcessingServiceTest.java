@@ -53,7 +53,7 @@ class FileProcessingServiceTest {
     }
 
     @Test
-    void audioProcessingKeepsPreviewDisabledAndMarksReady() throws Exception {
+    void audioProcessingStoresTranscriptAndMarksPreviewReady() throws Exception {
         MaterialRepository materialRepository = mock(MaterialRepository.class);
         ExtractorRouter extractorRouter = mock(ExtractorRouter.class);
         DocumentIngestionService documentIngestionService = mock(DocumentIngestionService.class);
@@ -76,8 +76,9 @@ class FileProcessingServiceTest {
         verify(documentIngestionService).ingest(7L, 100L, "lecture.mp3", "音频文字稿");
         verify(materialRepository).save(material);
         assertThat(material.getStatus()).isEqualTo(Material.Status.READY);
+        assertThat(material.getTranscript()).isEqualTo("音频文字稿");
         assertThat(material.getPreviewPath()).isNull();
-        assertThat(material.getPreviewStatus()).isEqualTo(Material.PreviewStatus.NONE);
+        assertThat(material.getPreviewStatus()).isEqualTo(Material.PreviewStatus.READY);
         assertThat(material.getPreviewMessage()).isNull();
     }
 

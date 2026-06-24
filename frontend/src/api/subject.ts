@@ -9,6 +9,14 @@ export function createSubject(payload: CreateSubjectRequest): Promise<Subject> {
   return request<Subject>({ url: '/subjects', method: 'POST', data: payload })
 }
 
+export function updateSubject(id: number, payload: CreateSubjectRequest): Promise<Subject> {
+  return request<Subject>({ url: `/subjects/${id}`, method: 'PUT', data: payload })
+}
+
+export function deleteSubject(id: number): Promise<void> {
+  return request<void>({ url: `/subjects/${id}`, method: 'DELETE' })
+}
+
 export async function findOrCreateSubject(name: string): Promise<Subject> {
   const normalized = name.trim()
   if (!normalized) {

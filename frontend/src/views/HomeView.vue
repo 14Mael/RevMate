@@ -10,7 +10,7 @@
  * - Markdown 渲染回答
  */
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { chatStream, getHistoryList, saveHistory, generateHistoryId } from '@/api/chat'
 import { listSubjects } from '@/api/subject'
@@ -23,6 +23,7 @@ import type { ChatHistoryItem, Source, Subject } from '@/api/types'
 defineOptions({ name: 'HomeView' })
 
 const route = useRoute()
+const router = useRouter()
 
 /* ==================== 消息数据 ==================== */
 
@@ -53,7 +54,8 @@ const subjectNameMap = ref<Record<number, string>>({})
 
 async function refreshHistoryList() {
   try {
-    historyList.value = await getHistoryList()
+    const histories = await getHistoryList()
+    historyList.value = histories.filter((history) => !history.materialId)
   } catch {
     historyList.value = []
   }
@@ -320,7 +322,7 @@ const sourceIcon = {
               <PhQuotes :size="12" />
               {{ msg.quote }}
             </div>
-            <div class="msg-text">{{ msg.content }}</div>
+            <div class="msg-text markdown-body" v-html="renderMarkdown(msg.content)" />
           </div>
         </template>
 
@@ -338,7 +340,13 @@ const sourceIcon = {
           <div v-if="msg.sources.length > 0 && !msg.isStreaming" class="sources-section">
             <div class="sources-label">参考来源</div>
             <div class="sources-list">
-              <article v-for="(src, i) in msg.sources" :key="i" class="source-card">
+              <article
+                v-for="(src, i) in msg.sources"
+                :key="i"
+                class="source-card"
+                :class="{ clickable: src.materialId }"
+                @click="src.materialId && router.push(`/materials/${src.materialId}${src.page ? `#page=${src.page}` : ''}`)"
+              >
                 <component :is="sourceIcon[src.type]" :size="14" class="source-type-icon" />
                 <div class="source-body">
                   <div class="source-title">{{ src.title }}</div>
@@ -617,8 +625,8 @@ const sourceIcon = {
 }
 
 .msg-user {
-  align-self: flex-end;
-  align-items: flex-end;
+  margin-left: auto;
+  max-width: 72%;
 }
 
 .msg-assistant {
@@ -639,13 +647,27 @@ const sourceIcon = {
 .user-bubble {
   background: var(--color-primary);
   color: #fff;
-  max-width: 72%;
-  width: fit-content;
   border-bottom-right-radius: var(--radius-sm);
+}
+
+.user-bubble {
+  padding: 10px var(--space-lg);
+}
+
+.user-bubble :deep(p),
+.user-bubble :deep(strong) {
+  color: #fff;
+  margin: 0;
+  line-height: 1.3;
 }
 
 .msg-text {
   white-space: pre-wrap;
+}
+
+.user-bubble .msg-text {
+  line-height: 1.3;
+  white-space: normal;
 }
 
 .ai-bubble {
@@ -654,6 +676,7 @@ const sourceIcon = {
   border: 1px solid var(--color-border);
   max-width: 100%;
   border-bottom-left-radius: var(--radius-sm);
+  line-height: 1.5;
 }
 
 .msg-quote {
@@ -695,7 +718,7 @@ const sourceIcon = {
 
 /* Markdown body */
 .markdown-body :deep(p) {
-  margin: 0 0 var(--space-sm);
+  margin: 0 0 var(--space-xs);
 }
 .markdown-body :deep(p:last-child) {
   margin-bottom: 0;
@@ -762,6 +785,7 @@ const sourceIcon = {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
+  line-height: var(--line-height-body);
 }
 
 .markdown-body :deep(th) {
@@ -842,6 +866,10 @@ const sourceIcon = {
   max-width: 360px;
   flex: 1 1 260px;
   transition: all var(--duration-fast);
+}
+
+.source-card.clickable {
+  cursor: pointer;
 }
 
 .source-card:hover {

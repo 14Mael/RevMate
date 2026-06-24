@@ -58,6 +58,7 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
 
         entity.setTitle(truncate(request.getTitle()));
         entity.setSubjectId(request.getSubjectId());
+        entity.setMaterialId(request.getMaterialId());
         entity.setCourse(request.getCourse());
         entity.setMessagesJson(writeMessages(request.getMessages()));
         // 每次保存刷新时间，使活跃会话置顶（与前端原 localStorage 行为一致）
@@ -120,6 +121,7 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
                 readMessages(entity.getMessagesJson()),
                 entity.getCreatedAt(),
                 entity.getSubjectId(),
+                entity.getMaterialId(),
                 entity.getCourse()
         );
     }

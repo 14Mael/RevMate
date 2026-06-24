@@ -51,10 +51,12 @@ CREATE TABLE IF NOT EXISTS chat_histories (
     user_id BIGINT NOT NULL,
     title VARCHAR(200) NOT NULL,
     subject_id BIGINT COMMENT '会话关联的学科',
+    material_id BIGINT COMMENT '单资料问答关联的资料；智能问答为空',
     course VARCHAR(100) COMMENT '学科名快照',
     messages_json LONGTEXT COMMENT 'JSON 序列化的消息列表',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最近活跃时间，每次保存刷新',
-    INDEX idx_chat_histories_user_id (user_id)
+    INDEX idx_chat_histories_user_id (user_id),
+    INDEX idx_chat_histories_material_id (material_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 资料切片表：持久化 RAG/出题上下文，避免服务重启后 READY 资料无法检索
@@ -74,6 +76,21 @@ CREATE TABLE IF NOT EXISTS material_chunks (
     CONSTRAINT fk_material_chunks_material
         FOREIGN KEY (material_id) REFERENCES materials(id)
         ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 推荐课程收藏表：推荐结果不持久化，只有用户主动收藏的课程入库
+CREATE TABLE IF NOT EXISTS saved_courses (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    platform VARCHAR(100),
+    url VARCHAR(1024) NOT NULL,
+    reason VARCHAR(1000),
+    difficulty VARCHAR(20),
+    subject_id BIGINT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_saved_courses_user_id (user_id),
+    INDEX idx_saved_courses_subject_id (subject_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 错题本表：按用户和课程隔离，同一题干只保留一条

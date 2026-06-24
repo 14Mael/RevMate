@@ -16,5 +16,6 @@ public class ChatHistoryResponse {
     private List<ChatHistoryMessageDto> messages;
     private LocalDateTime createdAt;
     private Long subjectId;
+    private Long materialId;
     private String course;
 }

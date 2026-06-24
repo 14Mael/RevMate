@@ -5,12 +5,13 @@
  * - 复用 HomeView 的 Markdown 渲染和消息样式
  * - 不展示欢迎态、快捷提问、课程筛选、引用预览条
  */
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { chatStream } from '@/api/chat'
+import { chatStream, getHistoryList, saveHistory, generateHistoryId } from '@/api/chat'
 import { renderMarkdown } from '@/utils/markdown'
 import { PhPaperPlaneTilt, PhSparkle, PhX, PhBookOpen } from '@/components/icons'
-import type { Source, Subject } from '@/api/types'
+import type { Source, ChatHistoryItem } from '@/api/types'
 
 const props = defineProps<{ 
   materialId: number
@@ -21,6 +22,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
 }>()
+
+const router = useRouter()
 
 interface ChatMessage {
   id: number
@@ -34,8 +37,57 @@ const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const isGenerating = ref(false)
 const chatContainer = ref<HTMLDivElement>()
+const historyList = ref<ChatHistoryItem[]>([])
+const sessionId = ref(generateHistoryId())
 
 let nextId = 1
+
+async function refreshHistoryList() {
+  try {
+    const histories = await getHistoryList()
+    historyList.value = histories.filter((h) => h.materialId === props.materialId)
+    const latestForMaterial = historyList.value[0]
+    if (latestForMaterial) {
+      loadSession(latestForMaterial)
+    }
+  } catch {
+    historyList.value = []
+  }
+}
+
+function loadSession(item: ChatHistoryItem) {
+  sessionId.value = item.id
+  messages.value = item.messages.map((m, i) => ({
+    id: nextId++,
+    role: m.role,
+    content: m.content,
+    sources: [],
+    isStreaming: false
+  }))
+}
+
+async function persistCurrentSession() {
+  if (messages.value.length === 0) return
+  const firstUser = messages.value.find((m) => m.role === 'user')
+  const title = firstUser ? firstUser.content.slice(0, 40) : props.materialName
+  const historyMessages = messages.value.map((m) => ({
+    role: m.role,
+    content: m.content,
+    timestamp: new Date().toISOString()
+  }))
+  try {
+    await saveHistory({
+      id: sessionId.value,
+      title,
+      messages: historyMessages,
+      createdAt: new Date().toISOString(),
+      subjectId: props.subjectId,
+      materialId: props.materialId
+    })
+  } catch {
+    // 静默忽略
+  }
+}
 
 async function sendMessage() {
   const text = inputText.value.trim()
@@ -76,6 +128,7 @@ async function sendMessage() {
         streamingMsg.sources = chunk.sources
         streamingMsg.isStreaming = false
         isGenerating.value = false
+        await persistCurrentSession()
       }
       scrollToBottom()
     }
@@ -86,6 +139,15 @@ async function sendMessage() {
     ElMessage.error('问答请求失败')
   }
 }
+
+onMounted(refreshHistoryList)
+
+watch(() => props.materialId, () => {
+  sessionId.value = generateHistoryId()
+  messages.value = []
+  nextId = 1
+  refreshHistoryList()
+})
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -149,7 +211,13 @@ const sourceIcon: Record<string, typeof PhBookOpen> = {
           <div v-if="msg.sources.length > 0 && !msg.isStreaming" class="sources-section">
             <div class="sources-label">参考来源</div>
             <div class="sources-list">
-              <article v-for="(src, i) in msg.sources" :key="i" class="source-card">
+              <article
+                v-for="(src, i) in msg.sources"
+                :key="i"
+                class="source-card"
+                :class="{ clickable: src.materialId }"
+                @click="src.materialId && src.materialId !== props.materialId && router.push(`/materials/${src.materialId}${src.page ? `#page=${src.page}` : ''}`)"
+              >
                 <component :is="sourceIcon[src.type]" :size="14" class="source-type-icon" />
                 <div class="source-body">
                   <div class="source-title">{{ src.title }}</div>
@@ -478,6 +546,10 @@ const sourceIcon: Record<string, typeof PhBookOpen> = {
   border-radius: var(--radius-sm);
   background: var(--color-page-bg);
   transition: all var(--duration-fast);
+}
+
+.source-card.clickable {
+  cursor: pointer;
 }
 
 .source-card:hover {

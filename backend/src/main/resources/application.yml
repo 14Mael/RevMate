@@ -52,6 +52,18 @@ dashscope:
   poll-interval: ${DASHSCOPE_ASR_POLL_INTERVAL:PT2S}
   max-poll-attempts: ${DASHSCOPE_ASR_MAX_POLL_ATTEMPTS:300}
 
+# 联网搜索提供方：bocha（默认）或 serper
+search:
+  provider: ${SEARCH_PROVIDER:bocha}
+
+bocha:
+  api-key: ${BOCHA_API_KEY:}
+  base-url: ${BOCHA_BASE_URL:https://api.bochaai.com}
+
+serper:
+  api-key: ${SERPER_API_KEY:}
+  base-url: ${SERPER_BASE_URL:https://google.serper.dev}
+
 aliyun:
   oss:
     endpoint: ${ALIYUN_OSS_ENDPOINT:}

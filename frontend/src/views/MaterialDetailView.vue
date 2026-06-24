@@ -7,10 +7,13 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PhArrowLeft, PhChat, PhDownloadSimple, PhFileText, PhWarning } from '@/components/icons'
+import { ElMessage } from 'element-plus'
+import { PhArrowLeft, PhChat, PhDownloadSimple, PhFileText, PhSparkle, PhWarning } from '@/components/icons'
 import MaterialChatSidebar from '@/components/MaterialChatSidebar.vue'
-import { getMaterial, getPreviewUrl, canPreview } from '@/api/material'
-import type { Material } from '@/api/types'
+import CourseCardItem from '@/components/CourseCard.vue'
+import { getMaterial, getPreviewUrl, getAudioUrl, getTranscript, canPreview } from '@/api/material'
+import { extractCourseKeywords, recommendCourses, saveCourse } from '@/api/courses'
+import type { CourseCard, Material, SavedCourse } from '@/api/types'
 
 defineOptions({ name: 'MaterialDetailView' })
 
@@ -22,20 +25,54 @@ const material = ref<Material | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const previewUrl = ref('')
+const audioUrl = ref('')
+const transcript = ref('')
 const sidebarOpen = ref(true)
+const coursePanelOpen = ref(false)
+const courseKeywords = ref<string[]>([])
+const keywordInput = ref('')
+const courseResults = ref<CourseCard[]>([])
+const keywordLoading = ref(false)
+const recommendLoading = ref(false)
+const savingCourseUrl = ref('')
+const pdfIframe = ref<HTMLIFrameElement>()
 
-const previewAvailable = computed(() => !!material.value && canPreview(material.value) && !!previewUrl.value)
+const isAudio = computed(() => material.value?.type === 'audio')
+
+// 从 URL hash 提取页码（格式：#page=3）
+const targetPage = computed(() => {
+  const match = route.hash.match(/page=(\d+)/)
+  return match ? Number(match[1]) : null
+})
+
+const previewAvailable = computed(() => {
+  if (!material.value || !canPreview(material.value)) return false
+  if (isAudio.value) return !!audioUrl.value || !!transcript.value
+  return !!previewUrl.value
+})
+
+// 下载链接：音频用原文件，其它用预览 PDF
+const downloadUrl = computed(() => (isAudio.value ? audioUrl.value : previewUrl.value))
 
 const selectedText = ref('')
 const selectionTipVisible = ref(false)
 
-async function loadMaterial() {
-  loading.value = true
-  loadError.value = ''
+function revokeBlobUrls() {
   if (previewUrl.value) {
     URL.revokeObjectURL(previewUrl.value)
     previewUrl.value = ''
   }
+  if (audioUrl.value) {
+    URL.revokeObjectURL(audioUrl.value)
+    audioUrl.value = ''
+  }
+}
+
+async function loadMaterial() {
+  loading.value = true
+  loadError.value = ''
+  revokeBlobUrls()
+  transcript.value = ''
   try {
     const m = await getMaterial(materialId.value)
     if (!m) {
@@ -44,7 +81,13 @@ async function loadMaterial() {
     }
     material.value = m
     if (canPreview(m)) {
-      previewUrl.value = await getPreviewUrl(m.id)
+      if (m.type === 'audio') {
+        const [url, text] = await Promise.all([getAudioUrl(m.id), getTranscript(m.id)])
+        audioUrl.value = url
+        transcript.value = text
+      } else {
+        previewUrl.value = await getPreviewUrl(m.id)
+      }
     }
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '加载失败'
@@ -59,6 +102,107 @@ function goBack() {
 
 function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
+}
+
+async function toggleCoursePanel() {
+  coursePanelOpen.value = !coursePanelOpen.value
+  if (coursePanelOpen.value && courseKeywords.value.length === 0) {
+    await loadCourseKeywords()
+  }
+}
+
+async function loadCourseKeywords() {
+  if (!material.value) return
+  keywordLoading.value = true
+  try {
+    courseKeywords.value = await extractCourseKeywords(material.value.id)
+    keywordInput.value = courseKeywords.value.join(' ')
+  } catch {
+    ElMessage.error('关键词提炼失败')
+  } finally {
+    keywordLoading.value = false
+  }
+}
+
+function parseKeywordInput() {
+  return keywordInput.value
+    .split(/[\s,，、;；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+async function recommendForMaterial() {
+  const keywords = parseKeywordInput()
+  if (keywords.length === 0) {
+    ElMessage.warning('请先输入关键词')
+    return
+  }
+
+  recommendLoading.value = true
+  try {
+    courseResults.value = await recommendCourses(keywords)
+    if (courseResults.value.length === 0) {
+      ElMessage.info('暂时没有找到合适的课程')
+    }
+  } catch {
+    ElMessage.error('搜索服务暂不可用')
+  } finally {
+    recommendLoading.value = false
+  }
+}
+
+async function saveRecommendedCourse(course: CourseCard | SavedCourse) {
+  savingCourseUrl.value = course.url
+  try {
+    await saveCourse({ ...course, subjectId: material.value?.subjectId ?? null })
+    ElMessage.success('已收藏')
+  } finally {
+    savingCourseUrl.value = ''
+  }
+}
+
+// PDF 加载完成后跳转到指定页码
+const hasNavigated = ref(false)
+
+function onPdfLoad() {
+  // 无页码时直接显示第一页，不需要特殊处理
+  if (!targetPage.value || !pdfIframe.value || hasNavigated.value) return
+  
+  hasNavigated.value = true
+  
+  // 方案1：直接修改 iframe 内部 location.hash，不触发重新加载
+  try {
+    const iframeWin = pdfIframe.value.contentWindow
+    if (iframeWin) {
+      iframeWin.location.hash = `page=${targetPage.value}`
+      return
+    }
+  } catch {
+    // 跨域异常，继续尝试
+  }
+  
+  // 方案2：通过 postMessage 尝试调用 PDF 查看器 API
+  try {
+    pdfIframe.value.contentWindow?.postMessage({
+      type: 'scroll',
+      pageNumber: targetPage.value
+    }, '*')
+  } catch {
+    // 静默忽略
+  }
+  
+  // 方案3：延迟后重试（处理 iframe 内部初始化延迟）
+  setTimeout(() => {
+    if (!pdfIframe.value) return
+    try {
+      const iframeWin = pdfIframe.value.contentWindow
+      if (iframeWin && iframeWin.location) {
+        iframeWin.location.hash = `page=${targetPage.value}`
+      }
+    } catch {
+      // 静默忽略
+    }
+  }, 500)
 }
 
 // 文本选中提示
@@ -78,13 +222,25 @@ function handleMouseUp() {
   }
 }
 
-watch(materialId, loadMaterial)
-onMounted(loadMaterial)
-onUnmounted(() => {
-  if (previewUrl.value) {
-    URL.revokeObjectURL(previewUrl.value)
+watch(materialId, () => {
+  hasNavigated.value = false
+  loadMaterial()
+})
+
+// 监听 URL hash 变化（同一页面内跳转页码）
+watch(() => route.hash, (newHash) => {
+  const match = newHash.match(/page=(\d+)/)
+  if (match && pdfIframe.value) {
+    try {
+      pdfIframe.value.contentWindow!.location.hash = `page=${match[1]}`
+    } catch {
+      // 静默忽略
+    }
   }
 })
+
+onMounted(loadMaterial)
+onUnmounted(revokeBlobUrls)
 </script>
 
 <template>
@@ -108,6 +264,15 @@ onUnmounted(() => {
       <div class="toolbar-right">
         <button
           class="sidebar-toggle-btn"
+          :class="{ active: coursePanelOpen }"
+          @click="toggleCoursePanel"
+          title="推荐课程"
+        >
+          <PhSparkle :size="16" />
+          <span>推荐课程</span>
+        </button>
+        <button
+          class="sidebar-toggle-btn"
           :class="{ active: sidebarOpen }"
           @click="toggleSidebar"
           title="问答侧边栏"
@@ -115,7 +280,7 @@ onUnmounted(() => {
           <PhChat :size="16" />
           <span>问答</span>
         </button>
-        <a class="download-btn" :href="previewUrl || undefined" :download="material?.filename || 'preview.pdf'">
+        <a class="download-btn" :href="downloadUrl || undefined" :download="material?.filename || 'preview'">
           <PhDownloadSimple :size="16" />
           下载
         </a>
@@ -144,13 +309,28 @@ onUnmounted(() => {
           <button class="back-btn" @click="goBack">返回资料列表</button>
         </div>
 
+        <!-- 音频预览：播放器 + 转写文字稿 -->
+        <div v-else-if="isAudio" class="audio-preview">
+          <div class="audio-player-bar">
+            <PhFileText :size="18" class="audio-icon" />
+            <audio v-if="audioUrl" class="audio-player" :src="audioUrl" controls preload="metadata" />
+          </div>
+          <div class="transcript-panel">
+            <div class="transcript-title">转写文字稿</div>
+            <p v-if="transcript" class="transcript-text">{{ transcript }}</p>
+            <p v-else class="transcript-empty">暂无转写文字稿</p>
+          </div>
+        </div>
+
         <!-- 浏览器内置 PDF 查看器 -->
         <iframe
           v-else
+          ref="pdfIframe"
           class="pdf-iframe"
           :src="previewUrl"
           frameborder="0"
           title="PDF Preview"
+          @load="onPdfLoad"
         />
       </main>
 
@@ -162,6 +342,54 @@ onUnmounted(() => {
         :material-name="material.filename"
         @close="sidebarOpen = false"
       />
+
+      <aside v-if="coursePanelOpen && material" class="course-panel">
+        <div class="course-panel-header">
+          <div>
+            <h3>推荐课程</h3>
+            <p>基于当前资料提炼关键词，搜索可继续学习的资源。</p>
+          </div>
+        </div>
+
+        <div class="keyword-box">
+          <div class="keyword-label">关键词</div>
+          <div v-if="keywordLoading" class="panel-muted">正在提炼关键词...</div>
+          <input
+            v-else
+            v-model="keywordInput"
+            class="keyword-input"
+            placeholder="例如：进程调度 死锁"
+            @keyup.enter="recommendForMaterial"
+          />
+          <div v-if="courseKeywords.length > 0" class="keyword-chips">
+            <button
+              v-for="keyword in courseKeywords"
+              :key="keyword"
+              class="keyword-chip"
+              @click="keywordInput = keyword"
+            >
+              {{ keyword }}
+            </button>
+          </div>
+        </div>
+
+        <button class="recommend-btn" :disabled="keywordLoading || recommendLoading" @click="recommendForMaterial">
+          {{ recommendLoading ? '推荐中...' : '生成推荐' }}
+        </button>
+
+        <div v-if="!recommendLoading && courseResults.length === 0" class="panel-empty">
+          课程推荐会显示在这里。
+        </div>
+        <div v-else class="panel-list">
+          <CourseCardItem
+            v-for="course in courseResults"
+            :key="course.url"
+            :course="course"
+            :busy="savingCourseUrl === course.url"
+            @save="saveRecommendedCourse"
+          />
+        </div>
+      </aside>
     </div>
   </div>
 </template>
@@ -311,6 +539,59 @@ onUnmounted(() => {
   border: 0;
 }
 
+/* ---------- 音频预览 ---------- */
+.audio-preview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-page-bg);
+  overflow: hidden;
+}
+
+.audio-player-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--color-card-bg);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.audio-icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.audio-player {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+}
+
+.transcript-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+.transcript-title {
+  color: var(--color-text-assist);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  margin-bottom: var(--space-md);
+}
+.transcript-text {
+  color: var(--color-text-body);
+  font-size: var(--font-size-body);
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.transcript-empty {
+  color: var(--color-text-assist);
+  font-size: var(--font-size-body);
+}
+
 .error-state,
 .loading-state,
 .no-preview-state {
@@ -348,5 +629,119 @@ onUnmounted(() => {
   background: var(--color-primary-light);
   color: var(--color-primary);
   font-size: var(--font-size-small);
+}
+
+/* ---------- 推荐课程侧栏 ---------- */
+.course-panel {
+  width: 380px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  border-left: 1px solid var(--color-border);
+  background: var(--color-page-bg);
+  overflow-y: auto;
+}
+
+.course-panel-header h3 {
+  margin: 0 0 var(--space-xs) 0;
+  color: var(--color-text-title);
+  font-size: var(--font-size-h3);
+}
+
+.course-panel-header p {
+  margin: 0;
+  color: var(--color-text-assist);
+  font-size: var(--font-size-small);
+  line-height: 1.6;
+}
+
+.keyword-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.keyword-label {
+  color: var(--color-text-title);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+}
+
+.keyword-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card-bg);
+  color: var(--color-text-body);
+  font-size: var(--font-size-small);
+  outline: none;
+}
+
+.keyword-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.keyword-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.keyword-chip {
+  border: 0;
+  border-radius: var(--radius-full);
+  padding: 4px 10px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
+.recommend-btn {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-button-primary);
+}
+
+.recommend-btn:hover:not(:disabled) {
+  background: #4566E6;
+}
+
+.recommend-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.panel-empty,
+.panel-muted {
+  padding: var(--space-lg);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-card-bg);
+  color: var(--color-text-assist);
+  font-size: var(--font-size-small);
+  text-align: center;
+}
+
+@media (max-width: 1023px) {
+  .course-panel {
+    width: 320px;
+  }
 }
 </style>

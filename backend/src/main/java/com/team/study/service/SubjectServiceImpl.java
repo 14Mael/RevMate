@@ -49,17 +49,46 @@ public class SubjectServiceImpl implements SubjectService {
 
     @Override
     @Transactional
+    public SubjectResponse update(Long id, CreateSubjectRequest request) {
+        Long userId = currentUserId();
+        Subject subject = requireOwnedSubject(id, userId);
+        String name = normalizedName(request);
+        subjectRepository.findByUserIdAndName(userId, name)
+                .filter(existing -> !existing.getId().equals(id))
+                .ifPresent(existing -> {
+                    throw new IllegalArgumentException("学科已存在");
+                });
+
+        subject.setName(name);
+        return toResponse(subjectRepository.save(subject));
+    }
+
+    @Override
+    @Transactional
     public void delete(Long id) {
         Long userId = currentUserId();
+        Subject subject = requireOwnedSubject(id, userId);
+        if (materialRepository.existsBySubjectIdAndUserId(id, userId)) {
+            throw new IllegalArgumentException("请先删除该学科下的资料");
+        }
+        subjectRepository.delete(subject);
+    }
+
+    private Subject requireOwnedSubject(Long id, Long userId) {
         Subject subject = subjectRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("学科不存在或无权访问"));
         if (!subject.getUserId().equals(userId)) {
             throw new IllegalArgumentException("学科不存在或无权访问");
         }
-        if (materialRepository.existsBySubjectIdAndUserId(id, userId)) {
-            throw new IllegalArgumentException("请先删除该学科下的资料");
+        return subject;
+    }
+
+    private String normalizedName(CreateSubjectRequest request) {
+        String name = request.getName() == null ? "" : request.getName().trim();
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("学科名称不能为空");
         }
-        subjectRepository.delete(subject);
+        return name;
     }
 
     private Long currentUserId() {
