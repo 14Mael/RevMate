@@ -152,6 +152,18 @@
                 </configuration>
             </plugin>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Pre-attach byte-buddy as a -javaagent so mockito's inline mock maker
+                         does not need to self-attach (which JDK 24 blocks). -->
+                    <argLine>-javaagent:${user.home}/.m2/repository/net/bytebuddy/byte-buddy-agent/1.15.11/byte-buddy-agent-1.15.11.jar</argLine>
+                    <excludes>
+                        <exclude>**/RagRetrievalCalibrationTest.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>

@@ -53,7 +53,7 @@ class FileProcessingServiceTest {
     }
 
     @Test
-    void audioProcessingStoresTranscriptAndMarksPreviewReady() throws Exception {
+    void audioProcessingKeepsPreviewDisabledAndMarksReady() throws Exception {
         MaterialRepository materialRepository = mock(MaterialRepository.class);
         ExtractorRouter extractorRouter = mock(ExtractorRouter.class);
         DocumentIngestionService documentIngestionService = mock(DocumentIngestionService.class);
